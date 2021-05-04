@@ -4,7 +4,7 @@
   "description": "Manage npmrc files for Architect project",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest --passWithNoTests --detectOpenHandles",
     "lint": "eslint --ext .js,.ts '*.{js,ts}' src/"
   },
   "repository": {
@@ -25,7 +25,9 @@
     "eslint": "7.25.0",
     "eslint-config-prettier": "8.3.0",
     "eslint-plugin-import": "^2.22.1",
+    "eslint-plugin-jest": "^24.3.6",
     "eslint-plugin-prettier": "3.4.0",
+    "jest": "^26.6.3",
     "prettier": "2.2.1"
   }
 }
