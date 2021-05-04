@@ -18,7 +18,8 @@
     "url": "https://github.com/w33ble/architect-npmrc-action/issues"
   },
   "dependencies": {
-    "@actions/core": "^1.1.0"
+    "@actions/core": "^1.1.0",
+    "@actions/glob": "^0.1.1"
   },
   "devDependencies": {
     "eslint": "7.25.0",
