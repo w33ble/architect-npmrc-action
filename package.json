@@ -1,0 +1,30 @@
+{
+  "name": "architect-npmrc-action",
+  "version": "1.0.0",
+  "description": "Manage npmrc files for Architect project",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "eslint --ext .js,.ts '*.{js,ts}' src/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/w33ble/architect-npmrc-action.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/w33ble/architect-npmrc-action/issues"
+  },
+  "dependencies": {
+    "@actions/core": "^1.1.0"
+  },
+  "devDependencies": {
+    "eslint": "7.25.0",
+    "eslint-config-prettier": "8.3.0",
+    "eslint-plugin-import": "^2.22.1",
+    "eslint-plugin-prettier": "3.4.0",
+    "prettier": "2.2.1"
+  }
+}

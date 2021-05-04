@@ -1,0 +1,53 @@
+module.exports = {
+  env: {
+    es6: true,
+    node: true,
+  },
+  extends: ['eslint:recommended', 'plugin:import/recommended', 'plugin:prettier/recommended'],
+  parserOptions: {
+    ecmaVersion: 2020,
+    sourceType: 'module',
+  },
+  rules: {
+    'array-callback-return': 'error',
+    'class-methods-use-this': 'error',
+    'consistent-return': 'error',
+    eqeqeq: 'error',
+    'guard-for-in': 'error',
+    'import/order': [
+      'error',
+      {
+        groups: ['builtin', 'external', 'internal', 'parent', 'sibling', 'index'],
+      },
+    ],
+    'import/newline-after-import': 'error',
+    'new-cap': 'error',
+    'new-parens': 'error',
+    'no-else-return': [
+      'error',
+      {
+        allowElseIf: false,
+      },
+    ],
+    'no-eval': 'error',
+    'no-invalid-this': 'error',
+    'no-alert': 'error',
+    'no-console': 'error',
+    'no-extend-native': 'error',
+    'no-param-reassign': 'error',
+    'no-proto': 'error',
+    'no-process-exit': 'error',
+    'no-return-assign': 'error',
+    'no-shadow': 'error',
+    'no-throw-literal': 'error',
+    'no-useless-return': 'error',
+    'object-curly-newline': ['error', { consistent: true, multiline: true }],
+    'object-property-newline': ['error', { allowAllPropertiesOnSameLine: true }],
+    'object-shorthand': 'error',
+    'one-var-declaration-per-line': 'error',
+    'prefer-promise-reject-errors': 'error',
+    radix: 'error',
+    'unicode-bom': 'error',
+    'wrap-iife': 'error',
+  },
+};

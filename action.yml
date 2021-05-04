@@ -1,0 +1,26 @@
+name: 'Architect npmrc management'
+description: 'Manage npmrc files for Architect project'
+
+inputs:
+  registry:
+    description: 'npm registry url'
+    required: true
+    default: 'registry.npmjs.org'
+  token:
+    description: 'npm registry auth token'
+    required: false
+  scope:
+    description: 'package scope'
+    required: false
+  workspace:
+    description: 'project workspace, where to write the npmrc file'
+    required: false
+    default: '.'
+
+outputs:
+  time: # id of output
+    description: 'The time we greeted you'
+
+runs:
+  using: 'node12'
+  main: 'src/index.js'
