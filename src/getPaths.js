@@ -2,7 +2,7 @@ const path = require('path');
 const getInventory = require('@architect/inventory');
 
 module.exports = async function getPaths() {
-  const { inv: inventory } = await getInventory({ cwd: path.join(__dirname, '..') });
+  const { inv: inventory } = await getInventory({ cwd: process.cwd() });
 
   // NOTE: no need to worry about inventory.macros, the are not deployed
   const sharedPath = inventory.shared != null ? [path.resolve(inventory.shared.src)] : [];
