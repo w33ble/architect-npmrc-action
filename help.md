@@ -2,7 +2,7 @@
 
 ## Developing
 
-To cut a new release, pull the project down and install the dependencies with `yarn`.
+Pull the project down and install the dependencies with `yarn`. Note that you should use node 12 as this is the version that the Github Action runs in.
 
 Tests can be created with a `.spec.js` extension.
 
