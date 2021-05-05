@@ -6,7 +6,9 @@
   "main": "src/index.js",
   "scripts": {
     "test": "jest --passWithNoTests --detectOpenHandles",
-    "lint": "eslint --ext .js,.ts '*.{js,ts}' src/"
+    "lint": "eslint --ext .js,.ts '*.{js,ts}' src/",
+    "build": "ncc build src/index.js -o dist",
+    "preversion": "rm -rf dist && yarn build && git add dist && git commit -m 'chore: update the build'"
   },
   "repository": {
     "type": "git",
@@ -23,6 +25,7 @@
     "@architect/inventory": "^1.3.2"
   },
   "devDependencies": {
+    "@zeit/ncc": "^0.22.3",
     "eslint": "7.25.0",
     "eslint-config-prettier": "8.3.0",
     "eslint-plugin-import": "^2.22.1",
