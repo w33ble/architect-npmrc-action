@@ -9,7 +9,7 @@ module.exports = function getContents() {
   core.debug(`Using registry ${registry}`);
 
   if (!registry || registry.length === 0) {
-    core.setFailed('Registry not provided');
+    throw new Error('Registry not provided');
   }
 
   const authString = token ? `//${registry}/:_authToken=${token}` : '';
