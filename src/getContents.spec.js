@@ -8,34 +8,34 @@ describe('getContents', () => {
     core.getInput.mockReset();
   });
 
-  test('returns content with token', () => {
+  test('returns content with registry', () => {
     core.getInput.mockImplementation((varName) => {
-      if (varName === 'registry') return 'localhost:4873';
+      if (varName === 'registry') return 'https://registry.npmjs.org';
+      return null;
+    });
+
+    expect(getContents()).toEqual(`registry=https://registry.npmjs.org/`);
+  });
+
+  test('returns content with registry and scope', () => {
+    core.getInput.mockImplementation((varName) => {
+      if (varName === 'registry') return 'https://npm.pkg.github.com/';
+      if (varName === 'scope') return '@superhappyfun';
+      return null;
+    });
+
+    expect(getContents()).toEqual(`@superhappyfun:registry=https://npm.pkg.github.com/`);
+  });
+
+  test('returns content with registry, scope, and token', () => {
+    core.getInput.mockImplementation((varName) => {
+      if (varName === 'registry') return 'http://localhost:4873';
       if (varName === 'token') return 'ghp_Z8DIB6FKaqHyb05vAy';
       if (varName === 'scope') return '@superhappyfun';
       return null;
     });
 
     expect(getContents()).toEqual(`//localhost:4873/:_authToken=ghp_Z8DIB6FKaqHyb05vAy
-@superhappyfun:registry=localhost:4873`);
-  });
-
-  test('returns content without token', () => {
-    core.getInput.mockImplementation((varName) => {
-      if (varName === 'registry') return 'localhost:4873';
-      if (varName === 'scope') return '@superhappyfun';
-      return null;
-    });
-
-    expect(getContents()).toEqual(`@superhappyfun:registry=localhost:4873`);
-  });
-
-  test('returns content without token or scope', () => {
-    core.getInput.mockImplementation((varName) => {
-      if (varName === 'registry') return 'localhost:4873';
-      return null;
-    });
-
-    expect(getContents()).toEqual(`registry=localhost:4873`);
+@superhappyfun:registry=http://localhost:4873/`);
   });
 });

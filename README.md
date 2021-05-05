@@ -6,7 +6,7 @@ This action creates an npmrc file and copies it into each of the lambda paths. T
 
 ### `registry`
 
-**Required** The URL of the registry in use, without the trailing slash. Ex. `npm.pkg.github.com`
+**Required** The URL of the registry in use, as a full URL, and may include the trailing slash. Ex. `https://npm.pkg.github.com`
 
 ### `token`
 
