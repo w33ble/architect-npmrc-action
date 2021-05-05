@@ -2,7 +2,8 @@
   "name": "architect-npmrc-action",
   "version": "1.0.0",
   "description": "Manage npmrc files for Architect project",
-  "main": "index.js",
+  "private": true,
+  "main": "src/index.js",
   "scripts": {
     "test": "jest --passWithNoTests --detectOpenHandles",
     "lint": "eslint --ext .js,.ts '*.{js,ts}' src/"
