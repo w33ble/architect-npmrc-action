@@ -5,6 +5,7 @@ module.exports = function getContents() {
   const token = core.getInput('token');
   const scope = core.getInput('scope');
 
+  core.setSecret(token); // never log this value
   core.debug(`Using registry ${registry}`);
   core.debug(`Using scope ${scope}`);
 
