@@ -12212,7 +12212,7 @@ const path = __webpack_require__(622);
 const getInventory = __webpack_require__(454);
 
 module.exports = async function getPaths() {
-  const { inv: inventory } = await getInventory({ cwd: path.join(__dirname, '..') });
+  const { inv: inventory } = await getInventory({ cwd: process.cwd() });
 
   // NOTE: no need to worry about inventory.macros, the are not deployed
   const sharedPath = inventory.shared != null ? [path.resolve(inventory.shared.src)] : [];
@@ -13656,6 +13656,7 @@ module.exports = function getContents() {
   const token = core.getInput('token');
   const scope = core.getInput('scope');
 
+  core.setSecret(token); // never log this value
   core.debug(`Using registry ${registry}`);
   core.debug(`Using scope ${scope}`);
 
