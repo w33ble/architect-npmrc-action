@@ -12,7 +12,7 @@ module.exports = {
     'array-callback-return': 'error',
     'class-methods-use-this': 'error',
     'consistent-return': 'error',
-    eqeqeq: 'error',
+    eqeqeq: ['error', 'always', { null: 'ignore' }],
     'guard-for-in': 'error',
     'import/order': [
       'error',

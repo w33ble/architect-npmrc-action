@@ -5,7 +5,7 @@ const getContents = require('./getContents');
 const getPaths = require('./getPaths');
 
 async function main() {
-  const workspace = core.getInput('workspace') ?? '.';
+  const workspace = core.getInput('workspace') != null ? core.getInput('workspace') : '.';
   core.debug(`Using workspace ${workspace}`);
 
   const filepath = path.resolve(__dirname, `../${workspace}/.npmrc`);
