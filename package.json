@@ -1,6 +1,6 @@
 {
   "name": "architect-npmrc-action",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Manage npmrc files for Architect project",
   "private": true,
   "main": "src/index.js",
