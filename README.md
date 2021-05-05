@@ -1,6 +1,6 @@
 # architect-npmrc-action
 
-This action creates an npmrc file and copies it into each of the paths in `src`, including `src/macros` and `src/shared`. This action exists because Architect doesn't observe the project-level `.npmrc` file and its tree shaking process requires that any npm config be placed in the path where the package is used.
+This action creates an npmrc file and copies it into each of the lambda paths. This action exists because Architect doesn't observe the project-level `.npmrc` file and its tree shaking process requires that any npm config be placed in the path where the package is used.
 
 ## Inputs
 
@@ -29,9 +29,25 @@ The path to the top-level `.npmrc`.
 ## Example usage
 
 ```yaml
-uses: w33ble/architect-npmrc-action@main
-with:
-  registry: 'registry.npmjs.org'
-  token: 'ghp_83TZvdlKOBSy7McFsg'
-  scope: '@myscope'
+jobs:
+  deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    needs: [install]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v2
+
+      - name: Build
+        run: yarn build
+
+      - name: Configure npm
+        uses: w33ble/architect-npmrc-action@main
+        with:
+          registry: 'registry.npmjs.org'
+          token: 'ghp_83TZvdlKOBSy7McFsg'
+          scope: '@myscope'
+
+      - name: Deploy Stack
+        run: yarn deploy
 ```
