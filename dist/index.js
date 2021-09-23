@@ -42,12 +42,102 @@ module.exports =
 /******/ 		// Load entry module and return exports
 /******/ 		return __webpack_require__(676);
 /******/ 	};
+/******/ 	// initialize runtime
+/******/ 	runtime(__webpack_require__);
 /******/
 /******/ 	// run startup
 /******/ 	return startup();
 /******/ })
 /************************************************************************/
 /******/ ({
+
+/***/ 7:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let banner = __webpack_require__(314)
+let chars = __webpack_require__(438)
+let fingerprint = __webpack_require__(448)
+let getLambdaName = __webpack_require__(114)
+let pathToUnix = __webpack_require__(376)
+let toLogicalID = __webpack_require__(561)
+let updater = __webpack_require__(464)
+
+module.exports = {
+  banner,         // Prints banner and loads basic env vars and AWS creds
+  chars,          // Returns platform appropriate characters for CLI UI printing
+  fingerprint,    // Generates public/static.json for `@static fingerprint true`
+  getLambdaName,  // Get Lambda name from Arc path
+  pathToUnix,     // Normalize to `/` seperated paths for Windows-specific calls
+  toLogicalID,    // Converts dash casing into Pascal casing for CloudFormation
+  updater,        // Standard Arc status updater and progress indicator
+}
+
+
+/***/ }),
+
+/***/ 11:
+/***/ (function(module) {
+
+// Returns a wrapper function that returns a wrapped callback
+// The wrapper function should do some stuff, and return a
+// presumably different callback function.
+// This makes sure that own properties are retained, so that
+// decorations and such are not lost along the way.
+module.exports = wrappy
+function wrappy (fn, cb) {
+  if (fn && cb) return wrappy(fn)(cb)
+
+  if (typeof fn !== 'function')
+    throw new TypeError('need wrapper function')
+
+  Object.keys(fn).forEach(function (k) {
+    wrapper[k] = fn[k]
+  })
+
+  return wrapper
+
+  function wrapper() {
+    var args = new Array(arguments.length)
+    for (var i = 0; i < args.length; i++) {
+      args[i] = arguments[i]
+    }
+    var ret = fn.apply(this, args)
+    var cb = args[args.length-1]
+    if (typeof ret === 'function' && ret !== cb) {
+      Object.keys(cb).forEach(function (k) {
+        ret[k] = cb[k]
+      })
+    }
+    return ret
+  }
+}
+
+
+/***/ }),
+
+/***/ 28:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let { join } = __webpack_require__(622)
+
+module.exports = function populateEvents ({ item, dir, cwd }) {
+  if (typeof item === 'string') {
+    let name = item
+    let src = join(cwd, dir, name)
+    return { name, src }
+  }
+  else if (typeof item === 'object' && !Array.isArray(item)) {
+    let name = Object.keys(item)[0]
+    let src = item[name].src
+      ? join(cwd, item[name].src)
+      : join(cwd, dir, name)
+    return { name, src }
+  }
+  throw Error(`Invalid @events or @queues item: ${item}`)
+}
+
+
+/***/ }),
 
 /***/ 45:
 /***/ (function(module, __unusedexports, __webpack_require__) {
@@ -78,15 +168,64 @@ module.exports = function getArcConfig (params) {
 /***/ 46:
 /***/ (function(module) {
 
-module.exports = function validateAWS (aws, errors) {
+module.exports = function validateAWS (aws) {
   let { apigateway } = aws
 
   if (apigateway) {
     let valid = [ 'http', 'httpv1', 'httpv2', 'rest' ]
     if (!valid.some(v => v === apigateway)) {
-      errors.push(`API type must be 'http[v1|v2]', or 'rest'`)
+      throw ReferenceError(`API type must be 'http[v1|v2]', or 'rest'`)
     }
   }
+}
+
+
+/***/ }),
+
+/***/ 49:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+var wrappy = __webpack_require__(11)
+module.exports = wrappy(once)
+module.exports.strict = wrappy(onceStrict)
+
+once.proto = once(function () {
+  Object.defineProperty(Function.prototype, 'once', {
+    value: function () {
+      return once(this)
+    },
+    configurable: true
+  })
+
+  Object.defineProperty(Function.prototype, 'onceStrict', {
+    value: function () {
+      return onceStrict(this)
+    },
+    configurable: true
+  })
+})
+
+function once (fn) {
+  var f = function () {
+    if (f.called) return f.value
+    f.called = true
+    return f.value = fn.apply(this, arguments)
+  }
+  f.called = false
+  return f
+}
+
+function onceStrict (fn) {
+  var f = function () {
+    if (f.called)
+      throw new Error(f.onceError)
+    f.called = true
+    return f.value = fn.apply(this, arguments)
+  }
+  var name = fn.name || 'Function wrapped with `once`'
+  f.onceError = name + " shouldn't be called more than once"
+  f.called = false
+  return f
 }
 
 
@@ -138,32 +277,6 @@ module.exports = class PragmaSyntaxError extends SyntaxError {
 
 /***/ }),
 
-/***/ 61:
-/***/ (function(module, __unusedexports, __webpack_require__) {
-
-let { regex, size, unique } = __webpack_require__(739)
-
-/**
- * Validate @ws (WebSockets)
- *
- * AWS hasn't (yet) published validation on WebSocket route names, so this is based entirely on observed behavior
- */
-module.exports = function validateWS (websockets, errors) {
-  // No need to check pragma length as WS always has 3 defaults
-  unique(websockets, '@ws', errors)
-
-  websockets.forEach(ws => {
-    let { name } = ws
-
-    // No observed char length limits but let's be reasonable
-    size(name, 1, 255, '@ws', errors)
-    regex(name, 'veryLooseName', '@ws', errors)
-  })
-}
-
-
-/***/ }),
-
 /***/ 63:
 /***/ (function(module) {
 
@@ -179,64 +292,22 @@ module.exports = class MapKeyNotStrng extends SyntaxError {
 
 /***/ }),
 
-/***/ 65:
-/***/ (function(module, __unusedexports, __webpack_require__) {
+/***/ 64:
+/***/ (function(module) {
 
-let { regex, size, unique } = __webpack_require__(739)
-let { deepStrictEqual } = __webpack_require__(357)
-
-/**
- * Validate @tables + @indexes
- *
- * Where possible, attempts to follow DynamoDB validation
- * See: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.NamingRulesDataTypes.html
- */
-module.exports = function validateTablesAndIndexes (pragma, pragmaName, errors) {
-  if (pragma.length) {
-    pragma.forEach(table => {
-      let { name, indexName, partitionKey, sortKey } = table
-
-      size(name, 3, 255, pragmaName, errors)
-      regex(name, 'veryLooseName', pragmaName, errors)
-
-      if (!partitionKey) errors.push(`Invalid ${pragmaName} item (partition key required): '${name}'`)
-      if (indexName) {
-        size(indexName, 3, 255, pragmaName, errors)
-        regex(indexName, 'veryLooseName', pragmaName, errors)
-      }
-      if (partitionKey) {
-        size(partitionKey, 1, 255, pragmaName, errors)
-        regex(partitionKey, 'veryLooseName', pragmaName, errors)
-      }
-      if (sortKey) {
-        size(sortKey, 1, 255, pragmaName, errors)
-        regex(sortKey, 'veryLooseName', pragmaName, errors)
-      }
-    })
-
-    if (pragmaName === '@tables') {
-      unique(pragma, pragmaName, errors)
-    }
-    else {
-      let copy = JSON.parse(JSON.stringify(pragma))
-      copy.forEach((index, i) => {
-        copy.splice(i, 1)
-        let foundDupe = index && copy.some(expect => {
-          try {
-            deepStrictEqual(index, expect)
-            return true
-          }
-          catch (err) {
-            return false
-          }
-        })
-        if (foundDupe) {
-          let err = `Duplicate @indexes value: '${index.name}'`
-          if (!errors.includes(err)) errors.push(err)
-        }
-      })
-    }
-  }
+module.exports = function getHandler (config, src) {
+  let { handler, runtime } = config
+  let parts = handler.split('.')
+  if (parts.length !== 2) throw Error(`Invalid handler: ${handler}. Expected {file}.{function}, example: index.handler`)
+  let ext
+  if (runtime.startsWith('nodejs')) ext = 'js'
+  if (runtime.startsWith('python')) ext = 'py'
+  if (runtime.startsWith('ruby'))   ext = 'rb'
+  if (runtime.startsWith('deno'))   ext = 'ts'
+  // TODO add Go, Java, .NET, etc.
+  let handlerFile = `${src}/${parts[0]}${ext ? '.' + ext : ''}`
+  let handlerFunction = parts[1]
+  return { handlerFile, handlerFunction }
 }
 
 
@@ -327,6 +398,981 @@ module.exports = require("os");
 
 /***/ }),
 
+/***/ 90:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let populate = __webpack_require__(631)
+
+module.exports = function configureEvents ({ arc, inventory }) {
+  if (!arc.events || !arc.events.length) return null
+
+  let events = populate.events(arc.events, inventory)
+
+  return events
+}
+
+
+/***/ }),
+
+/***/ 93:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+module.exports = minimatch
+minimatch.Minimatch = Minimatch
+
+var path = { sep: '/' }
+try {
+  path = __webpack_require__(622)
+} catch (er) {}
+
+var GLOBSTAR = minimatch.GLOBSTAR = Minimatch.GLOBSTAR = {}
+var expand = __webpack_require__(306)
+
+var plTypes = {
+  '!': { open: '(?:(?!(?:', close: '))[^/]*?)'},
+  '?': { open: '(?:', close: ')?' },
+  '+': { open: '(?:', close: ')+' },
+  '*': { open: '(?:', close: ')*' },
+  '@': { open: '(?:', close: ')' }
+}
+
+// any single thing other than /
+// don't need to escape / when using new RegExp()
+var qmark = '[^/]'
+
+// * => any number of characters
+var star = qmark + '*?'
+
+// ** when dots are allowed.  Anything goes, except .. and .
+// not (^ or / followed by one or two dots followed by $ or /),
+// followed by anything, any number of times.
+var twoStarDot = '(?:(?!(?:\\\/|^)(?:\\.{1,2})($|\\\/)).)*?'
+
+// not a ^ or / followed by a dot,
+// followed by anything, any number of times.
+var twoStarNoDot = '(?:(?!(?:\\\/|^)\\.).)*?'
+
+// characters that need to be escaped in RegExp.
+var reSpecials = charSet('().*{}+?[]^$\\!')
+
+// "abc" -> { a:true, b:true, c:true }
+function charSet (s) {
+  return s.split('').reduce(function (set, c) {
+    set[c] = true
+    return set
+  }, {})
+}
+
+// normalizes slashes.
+var slashSplit = /\/+/
+
+minimatch.filter = filter
+function filter (pattern, options) {
+  options = options || {}
+  return function (p, i, list) {
+    return minimatch(p, pattern, options)
+  }
+}
+
+function ext (a, b) {
+  a = a || {}
+  b = b || {}
+  var t = {}
+  Object.keys(b).forEach(function (k) {
+    t[k] = b[k]
+  })
+  Object.keys(a).forEach(function (k) {
+    t[k] = a[k]
+  })
+  return t
+}
+
+minimatch.defaults = function (def) {
+  if (!def || !Object.keys(def).length) return minimatch
+
+  var orig = minimatch
+
+  var m = function minimatch (p, pattern, options) {
+    return orig.minimatch(p, pattern, ext(def, options))
+  }
+
+  m.Minimatch = function Minimatch (pattern, options) {
+    return new orig.Minimatch(pattern, ext(def, options))
+  }
+
+  return m
+}
+
+Minimatch.defaults = function (def) {
+  if (!def || !Object.keys(def).length) return Minimatch
+  return minimatch.defaults(def).Minimatch
+}
+
+function minimatch (p, pattern, options) {
+  if (typeof pattern !== 'string') {
+    throw new TypeError('glob pattern string required')
+  }
+
+  if (!options) options = {}
+
+  // shortcut: comments match nothing.
+  if (!options.nocomment && pattern.charAt(0) === '#') {
+    return false
+  }
+
+  // "" only matches ""
+  if (pattern.trim() === '') return p === ''
+
+  return new Minimatch(pattern, options).match(p)
+}
+
+function Minimatch (pattern, options) {
+  if (!(this instanceof Minimatch)) {
+    return new Minimatch(pattern, options)
+  }
+
+  if (typeof pattern !== 'string') {
+    throw new TypeError('glob pattern string required')
+  }
+
+  if (!options) options = {}
+  pattern = pattern.trim()
+
+  // windows support: need to use /, not \
+  if (path.sep !== '/') {
+    pattern = pattern.split(path.sep).join('/')
+  }
+
+  this.options = options
+  this.set = []
+  this.pattern = pattern
+  this.regexp = null
+  this.negate = false
+  this.comment = false
+  this.empty = false
+
+  // make the set of regexps etc.
+  this.make()
+}
+
+Minimatch.prototype.debug = function () {}
+
+Minimatch.prototype.make = make
+function make () {
+  // don't do it more than once.
+  if (this._made) return
+
+  var pattern = this.pattern
+  var options = this.options
+
+  // empty patterns and comments match nothing.
+  if (!options.nocomment && pattern.charAt(0) === '#') {
+    this.comment = true
+    return
+  }
+  if (!pattern) {
+    this.empty = true
+    return
+  }
+
+  // step 1: figure out negation, etc.
+  this.parseNegate()
+
+  // step 2: expand braces
+  var set = this.globSet = this.braceExpand()
+
+  if (options.debug) this.debug = console.error
+
+  this.debug(this.pattern, set)
+
+  // step 3: now we have a set, so turn each one into a series of path-portion
+  // matching patterns.
+  // These will be regexps, except in the case of "**", which is
+  // set to the GLOBSTAR object for globstar behavior,
+  // and will not contain any / characters
+  set = this.globParts = set.map(function (s) {
+    return s.split(slashSplit)
+  })
+
+  this.debug(this.pattern, set)
+
+  // glob --> regexps
+  set = set.map(function (s, si, set) {
+    return s.map(this.parse, this)
+  }, this)
+
+  this.debug(this.pattern, set)
+
+  // filter out everything that didn't compile properly.
+  set = set.filter(function (s) {
+    return s.indexOf(false) === -1
+  })
+
+  this.debug(this.pattern, set)
+
+  this.set = set
+}
+
+Minimatch.prototype.parseNegate = parseNegate
+function parseNegate () {
+  var pattern = this.pattern
+  var negate = false
+  var options = this.options
+  var negateOffset = 0
+
+  if (options.nonegate) return
+
+  for (var i = 0, l = pattern.length
+    ; i < l && pattern.charAt(i) === '!'
+    ; i++) {
+    negate = !negate
+    negateOffset++
+  }
+
+  if (negateOffset) this.pattern = pattern.substr(negateOffset)
+  this.negate = negate
+}
+
+// Brace expansion:
+// a{b,c}d -> abd acd
+// a{b,}c -> abc ac
+// a{0..3}d -> a0d a1d a2d a3d
+// a{b,c{d,e}f}g -> abg acdfg acefg
+// a{b,c}d{e,f}g -> abdeg acdeg abdeg abdfg
+//
+// Invalid sets are not expanded.
+// a{2..}b -> a{2..}b
+// a{b}c -> a{b}c
+minimatch.braceExpand = function (pattern, options) {
+  return braceExpand(pattern, options)
+}
+
+Minimatch.prototype.braceExpand = braceExpand
+
+function braceExpand (pattern, options) {
+  if (!options) {
+    if (this instanceof Minimatch) {
+      options = this.options
+    } else {
+      options = {}
+    }
+  }
+
+  pattern = typeof pattern === 'undefined'
+    ? this.pattern : pattern
+
+  if (typeof pattern === 'undefined') {
+    throw new TypeError('undefined pattern')
+  }
+
+  if (options.nobrace ||
+    !pattern.match(/\{.*\}/)) {
+    // shortcut. no need to expand.
+    return [pattern]
+  }
+
+  return expand(pattern)
+}
+
+// parse a component of the expanded set.
+// At this point, no pattern may contain "/" in it
+// so we're going to return a 2d array, where each entry is the full
+// pattern, split on '/', and then turned into a regular expression.
+// A regexp is made at the end which joins each array with an
+// escaped /, and another full one which joins each regexp with |.
+//
+// Following the lead of Bash 4.1, note that "**" only has special meaning
+// when it is the *only* thing in a path portion.  Otherwise, any series
+// of * is equivalent to a single *.  Globstar behavior is enabled by
+// default, and can be disabled by setting options.noglobstar.
+Minimatch.prototype.parse = parse
+var SUBPARSE = {}
+function parse (pattern, isSub) {
+  if (pattern.length > 1024 * 64) {
+    throw new TypeError('pattern is too long')
+  }
+
+  var options = this.options
+
+  // shortcuts
+  if (!options.noglobstar && pattern === '**') return GLOBSTAR
+  if (pattern === '') return ''
+
+  var re = ''
+  var hasMagic = !!options.nocase
+  var escaping = false
+  // ? => one single character
+  var patternListStack = []
+  var negativeLists = []
+  var stateChar
+  var inClass = false
+  var reClassStart = -1
+  var classStart = -1
+  // . and .. never match anything that doesn't start with .,
+  // even when options.dot is set.
+  var patternStart = pattern.charAt(0) === '.' ? '' // anything
+  // not (start or / followed by . or .. followed by / or end)
+  : options.dot ? '(?!(?:^|\\\/)\\.{1,2}(?:$|\\\/))'
+  : '(?!\\.)'
+  var self = this
+
+  function clearStateChar () {
+    if (stateChar) {
+      // we had some state-tracking character
+      // that wasn't consumed by this pass.
+      switch (stateChar) {
+        case '*':
+          re += star
+          hasMagic = true
+        break
+        case '?':
+          re += qmark
+          hasMagic = true
+        break
+        default:
+          re += '\\' + stateChar
+        break
+      }
+      self.debug('clearStateChar %j %j', stateChar, re)
+      stateChar = false
+    }
+  }
+
+  for (var i = 0, len = pattern.length, c
+    ; (i < len) && (c = pattern.charAt(i))
+    ; i++) {
+    this.debug('%s\t%s %s %j', pattern, i, re, c)
+
+    // skip over any that are escaped.
+    if (escaping && reSpecials[c]) {
+      re += '\\' + c
+      escaping = false
+      continue
+    }
+
+    switch (c) {
+      case '/':
+        // completely not allowed, even escaped.
+        // Should already be path-split by now.
+        return false
+
+      case '\\':
+        clearStateChar()
+        escaping = true
+      continue
+
+      // the various stateChar values
+      // for the "extglob" stuff.
+      case '?':
+      case '*':
+      case '+':
+      case '@':
+      case '!':
+        this.debug('%s\t%s %s %j <-- stateChar', pattern, i, re, c)
+
+        // all of those are literals inside a class, except that
+        // the glob [!a] means [^a] in regexp
+        if (inClass) {
+          this.debug('  in class')
+          if (c === '!' && i === classStart + 1) c = '^'
+          re += c
+          continue
+        }
+
+        // if we already have a stateChar, then it means
+        // that there was something like ** or +? in there.
+        // Handle the stateChar, then proceed with this one.
+        self.debug('call clearStateChar %j', stateChar)
+        clearStateChar()
+        stateChar = c
+        // if extglob is disabled, then +(asdf|foo) isn't a thing.
+        // just clear the statechar *now*, rather than even diving into
+        // the patternList stuff.
+        if (options.noext) clearStateChar()
+      continue
+
+      case '(':
+        if (inClass) {
+          re += '('
+          continue
+        }
+
+        if (!stateChar) {
+          re += '\\('
+          continue
+        }
+
+        patternListStack.push({
+          type: stateChar,
+          start: i - 1,
+          reStart: re.length,
+          open: plTypes[stateChar].open,
+          close: plTypes[stateChar].close
+        })
+        // negation is (?:(?!js)[^/]*)
+        re += stateChar === '!' ? '(?:(?!(?:' : '(?:'
+        this.debug('plType %j %j', stateChar, re)
+        stateChar = false
+      continue
+
+      case ')':
+        if (inClass || !patternListStack.length) {
+          re += '\\)'
+          continue
+        }
+
+        clearStateChar()
+        hasMagic = true
+        var pl = patternListStack.pop()
+        // negation is (?:(?!js)[^/]*)
+        // The others are (?:<pattern>)<type>
+        re += pl.close
+        if (pl.type === '!') {
+          negativeLists.push(pl)
+        }
+        pl.reEnd = re.length
+      continue
+
+      case '|':
+        if (inClass || !patternListStack.length || escaping) {
+          re += '\\|'
+          escaping = false
+          continue
+        }
+
+        clearStateChar()
+        re += '|'
+      continue
+
+      // these are mostly the same in regexp and glob
+      case '[':
+        // swallow any state-tracking char before the [
+        clearStateChar()
+
+        if (inClass) {
+          re += '\\' + c
+          continue
+        }
+
+        inClass = true
+        classStart = i
+        reClassStart = re.length
+        re += c
+      continue
+
+      case ']':
+        //  a right bracket shall lose its special
+        //  meaning and represent itself in
+        //  a bracket expression if it occurs
+        //  first in the list.  -- POSIX.2 2.8.3.2
+        if (i === classStart + 1 || !inClass) {
+          re += '\\' + c
+          escaping = false
+          continue
+        }
+
+        // handle the case where we left a class open.
+        // "[z-a]" is valid, equivalent to "\[z-a\]"
+        if (inClass) {
+          // split where the last [ was, make sure we don't have
+          // an invalid re. if so, re-walk the contents of the
+          // would-be class to re-translate any characters that
+          // were passed through as-is
+          // TODO: It would probably be faster to determine this
+          // without a try/catch and a new RegExp, but it's tricky
+          // to do safely.  For now, this is safe and works.
+          var cs = pattern.substring(classStart + 1, i)
+          try {
+            RegExp('[' + cs + ']')
+          } catch (er) {
+            // not a valid class!
+            var sp = this.parse(cs, SUBPARSE)
+            re = re.substr(0, reClassStart) + '\\[' + sp[0] + '\\]'
+            hasMagic = hasMagic || sp[1]
+            inClass = false
+            continue
+          }
+        }
+
+        // finish up the class.
+        hasMagic = true
+        inClass = false
+        re += c
+      continue
+
+      default:
+        // swallow any state char that wasn't consumed
+        clearStateChar()
+
+        if (escaping) {
+          // no need
+          escaping = false
+        } else if (reSpecials[c]
+          && !(c === '^' && inClass)) {
+          re += '\\'
+        }
+
+        re += c
+
+    } // switch
+  } // for
+
+  // handle the case where we left a class open.
+  // "[abc" is valid, equivalent to "\[abc"
+  if (inClass) {
+    // split where the last [ was, and escape it
+    // this is a huge pita.  We now have to re-walk
+    // the contents of the would-be class to re-translate
+    // any characters that were passed through as-is
+    cs = pattern.substr(classStart + 1)
+    sp = this.parse(cs, SUBPARSE)
+    re = re.substr(0, reClassStart) + '\\[' + sp[0]
+    hasMagic = hasMagic || sp[1]
+  }
+
+  // handle the case where we had a +( thing at the *end*
+  // of the pattern.
+  // each pattern list stack adds 3 chars, and we need to go through
+  // and escape any | chars that were passed through as-is for the regexp.
+  // Go through and escape them, taking care not to double-escape any
+  // | chars that were already escaped.
+  for (pl = patternListStack.pop(); pl; pl = patternListStack.pop()) {
+    var tail = re.slice(pl.reStart + pl.open.length)
+    this.debug('setting tail', re, pl)
+    // maybe some even number of \, then maybe 1 \, followed by a |
+    tail = tail.replace(/((?:\\{2}){0,64})(\\?)\|/g, function (_, $1, $2) {
+      if (!$2) {
+        // the | isn't already escaped, so escape it.
+        $2 = '\\'
+      }
+
+      // need to escape all those slashes *again*, without escaping the
+      // one that we need for escaping the | character.  As it works out,
+      // escaping an even number of slashes can be done by simply repeating
+      // it exactly after itself.  That's why this trick works.
+      //
+      // I am sorry that you have to see this.
+      return $1 + $1 + $2 + '|'
+    })
+
+    this.debug('tail=%j\n   %s', tail, tail, pl, re)
+    var t = pl.type === '*' ? star
+      : pl.type === '?' ? qmark
+      : '\\' + pl.type
+
+    hasMagic = true
+    re = re.slice(0, pl.reStart) + t + '\\(' + tail
+  }
+
+  // handle trailing things that only matter at the very end.
+  clearStateChar()
+  if (escaping) {
+    // trailing \\
+    re += '\\\\'
+  }
+
+  // only need to apply the nodot start if the re starts with
+  // something that could conceivably capture a dot
+  var addPatternStart = false
+  switch (re.charAt(0)) {
+    case '.':
+    case '[':
+    case '(': addPatternStart = true
+  }
+
+  // Hack to work around lack of negative lookbehind in JS
+  // A pattern like: *.!(x).!(y|z) needs to ensure that a name
+  // like 'a.xyz.yz' doesn't match.  So, the first negative
+  // lookahead, has to look ALL the way ahead, to the end of
+  // the pattern.
+  for (var n = negativeLists.length - 1; n > -1; n--) {
+    var nl = negativeLists[n]
+
+    var nlBefore = re.slice(0, nl.reStart)
+    var nlFirst = re.slice(nl.reStart, nl.reEnd - 8)
+    var nlLast = re.slice(nl.reEnd - 8, nl.reEnd)
+    var nlAfter = re.slice(nl.reEnd)
+
+    nlLast += nlAfter
+
+    // Handle nested stuff like *(*.js|!(*.json)), where open parens
+    // mean that we should *not* include the ) in the bit that is considered
+    // "after" the negated section.
+    var openParensBefore = nlBefore.split('(').length - 1
+    var cleanAfter = nlAfter
+    for (i = 0; i < openParensBefore; i++) {
+      cleanAfter = cleanAfter.replace(/\)[+*?]?/, '')
+    }
+    nlAfter = cleanAfter
+
+    var dollar = ''
+    if (nlAfter === '' && isSub !== SUBPARSE) {
+      dollar = '$'
+    }
+    var newRe = nlBefore + nlFirst + nlAfter + dollar + nlLast
+    re = newRe
+  }
+
+  // if the re is not "" at this point, then we need to make sure
+  // it doesn't match against an empty path part.
+  // Otherwise a/* will match a/, which it should not.
+  if (re !== '' && hasMagic) {
+    re = '(?=.)' + re
+  }
+
+  if (addPatternStart) {
+    re = patternStart + re
+  }
+
+  // parsing just a piece of a larger pattern.
+  if (isSub === SUBPARSE) {
+    return [re, hasMagic]
+  }
+
+  // skip the regexp for non-magical patterns
+  // unescape anything in it, though, so that it'll be
+  // an exact match against a file etc.
+  if (!hasMagic) {
+    return globUnescape(pattern)
+  }
+
+  var flags = options.nocase ? 'i' : ''
+  try {
+    var regExp = new RegExp('^' + re + '$', flags)
+  } catch (er) {
+    // If it was an invalid regular expression, then it can't match
+    // anything.  This trick looks for a character after the end of
+    // the string, which is of course impossible, except in multi-line
+    // mode, but it's not a /m regex.
+    return new RegExp('$.')
+  }
+
+  regExp._glob = pattern
+  regExp._src = re
+
+  return regExp
+}
+
+minimatch.makeRe = function (pattern, options) {
+  return new Minimatch(pattern, options || {}).makeRe()
+}
+
+Minimatch.prototype.makeRe = makeRe
+function makeRe () {
+  if (this.regexp || this.regexp === false) return this.regexp
+
+  // at this point, this.set is a 2d array of partial
+  // pattern strings, or "**".
+  //
+  // It's better to use .match().  This function shouldn't
+  // be used, really, but it's pretty convenient sometimes,
+  // when you just want to work with a regex.
+  var set = this.set
+
+  if (!set.length) {
+    this.regexp = false
+    return this.regexp
+  }
+  var options = this.options
+
+  var twoStar = options.noglobstar ? star
+    : options.dot ? twoStarDot
+    : twoStarNoDot
+  var flags = options.nocase ? 'i' : ''
+
+  var re = set.map(function (pattern) {
+    return pattern.map(function (p) {
+      return (p === GLOBSTAR) ? twoStar
+      : (typeof p === 'string') ? regExpEscape(p)
+      : p._src
+    }).join('\\\/')
+  }).join('|')
+
+  // must match entire pattern
+  // ending in a * or ** will make it less strict.
+  re = '^(?:' + re + ')$'
+
+  // can match anything, as long as it's not this.
+  if (this.negate) re = '^(?!' + re + ').*$'
+
+  try {
+    this.regexp = new RegExp(re, flags)
+  } catch (ex) {
+    this.regexp = false
+  }
+  return this.regexp
+}
+
+minimatch.match = function (list, pattern, options) {
+  options = options || {}
+  var mm = new Minimatch(pattern, options)
+  list = list.filter(function (f) {
+    return mm.match(f)
+  })
+  if (mm.options.nonull && !list.length) {
+    list.push(pattern)
+  }
+  return list
+}
+
+Minimatch.prototype.match = match
+function match (f, partial) {
+  this.debug('match', f, this.pattern)
+  // short-circuit in the case of busted things.
+  // comments, etc.
+  if (this.comment) return false
+  if (this.empty) return f === ''
+
+  if (f === '/' && partial) return true
+
+  var options = this.options
+
+  // windows: need to use /, not \
+  if (path.sep !== '/') {
+    f = f.split(path.sep).join('/')
+  }
+
+  // treat the test path as a set of pathparts.
+  f = f.split(slashSplit)
+  this.debug(this.pattern, 'split', f)
+
+  // just ONE of the pattern sets in this.set needs to match
+  // in order for it to be valid.  If negating, then just one
+  // match means that we have failed.
+  // Either way, return on the first hit.
+
+  var set = this.set
+  this.debug(this.pattern, 'set', set)
+
+  // Find the basename of the path by looking for the last non-empty segment
+  var filename
+  var i
+  for (i = f.length - 1; i >= 0; i--) {
+    filename = f[i]
+    if (filename) break
+  }
+
+  for (i = 0; i < set.length; i++) {
+    var pattern = set[i]
+    var file = f
+    if (options.matchBase && pattern.length === 1) {
+      file = [filename]
+    }
+    var hit = this.matchOne(file, pattern, partial)
+    if (hit) {
+      if (options.flipNegate) return true
+      return !this.negate
+    }
+  }
+
+  // didn't get any hits.  this is success if it's a negative
+  // pattern, failure otherwise.
+  if (options.flipNegate) return false
+  return this.negate
+}
+
+// set partial to true to test if, for example,
+// "/a/b" matches the start of "/*/b/*/d"
+// Partial means, if you run out of file before you run
+// out of pattern, then that's fine, as long as all
+// the parts match.
+Minimatch.prototype.matchOne = function (file, pattern, partial) {
+  var options = this.options
+
+  this.debug('matchOne',
+    { 'this': this, file: file, pattern: pattern })
+
+  this.debug('matchOne', file.length, pattern.length)
+
+  for (var fi = 0,
+      pi = 0,
+      fl = file.length,
+      pl = pattern.length
+      ; (fi < fl) && (pi < pl)
+      ; fi++, pi++) {
+    this.debug('matchOne loop')
+    var p = pattern[pi]
+    var f = file[fi]
+
+    this.debug(pattern, p, f)
+
+    // should be impossible.
+    // some invalid regexp stuff in the set.
+    if (p === false) return false
+
+    if (p === GLOBSTAR) {
+      this.debug('GLOBSTAR', [pattern, p, f])
+
+      // "**"
+      // a/**/b/**/c would match the following:
+      // a/b/x/y/z/c
+      // a/x/y/z/b/c
+      // a/b/x/b/x/c
+      // a/b/c
+      // To do this, take the rest of the pattern after
+      // the **, and see if it would match the file remainder.
+      // If so, return success.
+      // If not, the ** "swallows" a segment, and try again.
+      // This is recursively awful.
+      //
+      // a/**/b/**/c matching a/b/x/y/z/c
+      // - a matches a
+      // - doublestar
+      //   - matchOne(b/x/y/z/c, b/**/c)
+      //     - b matches b
+      //     - doublestar
+      //       - matchOne(x/y/z/c, c) -> no
+      //       - matchOne(y/z/c, c) -> no
+      //       - matchOne(z/c, c) -> no
+      //       - matchOne(c, c) yes, hit
+      var fr = fi
+      var pr = pi + 1
+      if (pr === pl) {
+        this.debug('** at the end')
+        // a ** at the end will just swallow the rest.
+        // We have found a match.
+        // however, it will not swallow /.x, unless
+        // options.dot is set.
+        // . and .. are *never* matched by **, for explosively
+        // exponential reasons.
+        for (; fi < fl; fi++) {
+          if (file[fi] === '.' || file[fi] === '..' ||
+            (!options.dot && file[fi].charAt(0) === '.')) return false
+        }
+        return true
+      }
+
+      // ok, let's see if we can swallow whatever we can.
+      while (fr < fl) {
+        var swallowee = file[fr]
+
+        this.debug('\nglobstar while', file, fr, pattern, pr, swallowee)
+
+        // XXX remove this slice.  Just pass the start index.
+        if (this.matchOne(file.slice(fr), pattern.slice(pr), partial)) {
+          this.debug('globstar found match!', fr, fl, swallowee)
+          // found a match.
+          return true
+        } else {
+          // can't swallow "." or ".." ever.
+          // can only swallow ".foo" when explicitly asked.
+          if (swallowee === '.' || swallowee === '..' ||
+            (!options.dot && swallowee.charAt(0) === '.')) {
+            this.debug('dot detected!', file, fr, pattern, pr)
+            break
+          }
+
+          // ** swallows a segment, and continue.
+          this.debug('globstar swallow a segment, and continue')
+          fr++
+        }
+      }
+
+      // no match was found.
+      // However, in partial mode, we can't say this is necessarily over.
+      // If there's more *pattern* left, then
+      if (partial) {
+        // ran out of file
+        this.debug('\n>>> no match, partial?', file, fr, pattern, pr)
+        if (fr === fl) return true
+      }
+      return false
+    }
+
+    // something other than **
+    // non-magic patterns just have to match exactly
+    // patterns with magic have been turned into regexps.
+    var hit
+    if (typeof p === 'string') {
+      if (options.nocase) {
+        hit = f.toLowerCase() === p.toLowerCase()
+      } else {
+        hit = f === p
+      }
+      this.debug('string match', p, f, hit)
+    } else {
+      hit = f.match(p)
+      this.debug('pattern match', p, f, hit)
+    }
+
+    if (!hit) return false
+  }
+
+  // Note: ending in / means that we'll get a final ""
+  // at the end of the pattern.  This can only match a
+  // corresponding "" at the end of the file.
+  // If the file ends in /, then it can only match a
+  // a pattern that ends in /, unless the pattern just
+  // doesn't have any more for it. But, a/b/ should *not*
+  // match "a/b/*", even though "" matches against the
+  // [^/]*? pattern, except in partial mode, where it might
+  // simply not be reached yet.
+  // However, a/b/ should still satisfy a/*
+
+  // now either we fell off the end of the pattern, or we're done.
+  if (fi === fl && pi === pl) {
+    // ran out of pattern and filename at the same time.
+    // an exact hit!
+    return true
+  } else if (fi === fl) {
+    // ran out of file, but still had pattern left.
+    // this is ok if we're doing the match as part of
+    // a glob fs traversal.
+    return partial
+  } else if (pi === pl) {
+    // ran out of pattern, still have file left.
+    // this is only acceptable if we're on the very last
+    // empty segment of a file with a trailing slash.
+    // a/* should match a/b/
+    var emptyFileEnd = (fi === fl - 1) && (file[fi] === '')
+    return emptyFileEnd
+  }
+
+  // should be unreachable.
+  throw new Error('wtf?')
+}
+
+// replace stuff like \* with *
+function globUnescape (s) {
+  return s.replace(/\\(.)/g, '$1')
+}
+
+function regExpEscape (s) {
+  return s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')
+}
+
+
+/***/ }),
+
+/***/ 100:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let { getLambdaName } = __webpack_require__(7)
+
+module.exports = function populatePlugins ({ item: pluginName, cwd, inventory }) {
+  if (inventory._project.plugins[pluginName]) {
+    const pluginModule = inventory._project.plugins[pluginName]
+    if (pluginModule.functions || pluginModule.pluginFunctions) {
+      let funk = pluginModule.functions || pluginModule.pluginFunctions
+      const lambdas = funk({ arc: inventory._project.arc, inventory: { inv: inventory } }).map(f => {
+        // strip leading `src/` from the path to the plugin function relative to project root
+        let pathToCode = f.src.replace(cwd, '').replace(/^\.?\/?\\?/, '').replace(/^src\/?\\?/, '')
+        let name = getLambdaName(pathToCode)
+        f.name = name
+        return f
+      })
+      if (lambdas.length) {
+        return lambdas
+      }
+    }
+    return null
+  }
+  throw Error(`Invalid @plugins item: ${pluginName}`)
+}
+
+
+/***/ }),
+
 /***/ 102:
 /***/ (function(__unusedmodule, exports, __webpack_require__) {
 
@@ -376,6 +1422,438 @@ exports.issueCommand = issueCommand;
 
 /***/ }),
 
+/***/ 114:
+/***/ (function(module) {
+
+/*
+ * Lambda names:
+ * - Up to 64 characters
+ * - Can contain only letters, numbers, hyphens, and underscores
+ *
+ * Arc 4+ names Lambdas as such:
+ * - dashes:      '-' == '_'
+ * - dots:        '.' == '_'
+ * - underscores: '_' == '_'
+ * - slashes:     '/' == '-'
+ * - params:      ':' == '000'
+ *
+ * This is a lossy substitution, optimized for human readability
+ * One should not expect to be able to reliably extract Arc names from Lambda names created with this encoding
+ * Also, order matters: slashes should be converted last, after there are no more dashes to convert
+*/
+
+module.exports = function getLambdaName (fn) {
+  return fn === '/'
+    ? '-index'
+    : fn.replace(/-/g,  '_')
+      .replace(/\./g, '_')
+      .replace(/_/g,  '_')
+      .replace(/\//g, '-')
+      .replace(/\\/g, '-')
+      .replace(/:/g,  '000')
+      .replace(/\*/,  'catchall')
+}
+
+
+/***/ }),
+
+/***/ 117:
+/***/ (function(__unusedmodule, exports, __webpack_require__) {
+
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+var pathModule = __webpack_require__(622);
+var isWindows = process.platform === 'win32';
+var fs = __webpack_require__(747);
+
+// JavaScript implementation of realpath, ported from node pre-v6
+
+var DEBUG = process.env.NODE_DEBUG && /fs/.test(process.env.NODE_DEBUG);
+
+function rethrow() {
+  // Only enable in debug mode. A backtrace uses ~1000 bytes of heap space and
+  // is fairly slow to generate.
+  var callback;
+  if (DEBUG) {
+    var backtrace = new Error;
+    callback = debugCallback;
+  } else
+    callback = missingCallback;
+
+  return callback;
+
+  function debugCallback(err) {
+    if (err) {
+      backtrace.message = err.message;
+      err = backtrace;
+      missingCallback(err);
+    }
+  }
+
+  function missingCallback(err) {
+    if (err) {
+      if (process.throwDeprecation)
+        throw err;  // Forgot a callback but don't know where? Use NODE_DEBUG=fs
+      else if (!process.noDeprecation) {
+        var msg = 'fs: missing callback ' + (err.stack || err.message);
+        if (process.traceDeprecation)
+          console.trace(msg);
+        else
+          console.error(msg);
+      }
+    }
+  }
+}
+
+function maybeCallback(cb) {
+  return typeof cb === 'function' ? cb : rethrow();
+}
+
+var normalize = pathModule.normalize;
+
+// Regexp that finds the next partion of a (partial) path
+// result is [base_with_slash, base], e.g. ['somedir/', 'somedir']
+if (isWindows) {
+  var nextPartRe = /(.*?)(?:[\/\\]+|$)/g;
+} else {
+  var nextPartRe = /(.*?)(?:[\/]+|$)/g;
+}
+
+// Regex to find the device root, including trailing slash. E.g. 'c:\\'.
+if (isWindows) {
+  var splitRootRe = /^(?:[a-zA-Z]:|[\\\/]{2}[^\\\/]+[\\\/][^\\\/]+)?[\\\/]*/;
+} else {
+  var splitRootRe = /^[\/]*/;
+}
+
+exports.realpathSync = function realpathSync(p, cache) {
+  // make p is absolute
+  p = pathModule.resolve(p);
+
+  if (cache && Object.prototype.hasOwnProperty.call(cache, p)) {
+    return cache[p];
+  }
+
+  var original = p,
+      seenLinks = {},
+      knownHard = {};
+
+  // current character position in p
+  var pos;
+  // the partial path so far, including a trailing slash if any
+  var current;
+  // the partial path without a trailing slash (except when pointing at a root)
+  var base;
+  // the partial path scanned in the previous round, with slash
+  var previous;
+
+  start();
+
+  function start() {
+    // Skip over roots
+    var m = splitRootRe.exec(p);
+    pos = m[0].length;
+    current = m[0];
+    base = m[0];
+    previous = '';
+
+    // On windows, check that the root exists. On unix there is no need.
+    if (isWindows && !knownHard[base]) {
+      fs.lstatSync(base);
+      knownHard[base] = true;
+    }
+  }
+
+  // walk down the path, swapping out linked pathparts for their real
+  // values
+  // NB: p.length changes.
+  while (pos < p.length) {
+    // find the next part
+    nextPartRe.lastIndex = pos;
+    var result = nextPartRe.exec(p);
+    previous = current;
+    current += result[0];
+    base = previous + result[1];
+    pos = nextPartRe.lastIndex;
+
+    // continue if not a symlink
+    if (knownHard[base] || (cache && cache[base] === base)) {
+      continue;
+    }
+
+    var resolvedLink;
+    if (cache && Object.prototype.hasOwnProperty.call(cache, base)) {
+      // some known symbolic link.  no need to stat again.
+      resolvedLink = cache[base];
+    } else {
+      var stat = fs.lstatSync(base);
+      if (!stat.isSymbolicLink()) {
+        knownHard[base] = true;
+        if (cache) cache[base] = base;
+        continue;
+      }
+
+      // read the link if it wasn't read before
+      // dev/ino always return 0 on windows, so skip the check.
+      var linkTarget = null;
+      if (!isWindows) {
+        var id = stat.dev.toString(32) + ':' + stat.ino.toString(32);
+        if (seenLinks.hasOwnProperty(id)) {
+          linkTarget = seenLinks[id];
+        }
+      }
+      if (linkTarget === null) {
+        fs.statSync(base);
+        linkTarget = fs.readlinkSync(base);
+      }
+      resolvedLink = pathModule.resolve(previous, linkTarget);
+      // track this, if given a cache.
+      if (cache) cache[base] = resolvedLink;
+      if (!isWindows) seenLinks[id] = linkTarget;
+    }
+
+    // resolve the link, then start over
+    p = pathModule.resolve(resolvedLink, p.slice(pos));
+    start();
+  }
+
+  if (cache) cache[original] = p;
+
+  return p;
+};
+
+
+exports.realpath = function realpath(p, cache, cb) {
+  if (typeof cb !== 'function') {
+    cb = maybeCallback(cache);
+    cache = null;
+  }
+
+  // make p is absolute
+  p = pathModule.resolve(p);
+
+  if (cache && Object.prototype.hasOwnProperty.call(cache, p)) {
+    return process.nextTick(cb.bind(null, null, cache[p]));
+  }
+
+  var original = p,
+      seenLinks = {},
+      knownHard = {};
+
+  // current character position in p
+  var pos;
+  // the partial path so far, including a trailing slash if any
+  var current;
+  // the partial path without a trailing slash (except when pointing at a root)
+  var base;
+  // the partial path scanned in the previous round, with slash
+  var previous;
+
+  start();
+
+  function start() {
+    // Skip over roots
+    var m = splitRootRe.exec(p);
+    pos = m[0].length;
+    current = m[0];
+    base = m[0];
+    previous = '';
+
+    // On windows, check that the root exists. On unix there is no need.
+    if (isWindows && !knownHard[base]) {
+      fs.lstat(base, function(err) {
+        if (err) return cb(err);
+        knownHard[base] = true;
+        LOOP();
+      });
+    } else {
+      process.nextTick(LOOP);
+    }
+  }
+
+  // walk down the path, swapping out linked pathparts for their real
+  // values
+  function LOOP() {
+    // stop if scanned past end of path
+    if (pos >= p.length) {
+      if (cache) cache[original] = p;
+      return cb(null, p);
+    }
+
+    // find the next part
+    nextPartRe.lastIndex = pos;
+    var result = nextPartRe.exec(p);
+    previous = current;
+    current += result[0];
+    base = previous + result[1];
+    pos = nextPartRe.lastIndex;
+
+    // continue if not a symlink
+    if (knownHard[base] || (cache && cache[base] === base)) {
+      return process.nextTick(LOOP);
+    }
+
+    if (cache && Object.prototype.hasOwnProperty.call(cache, base)) {
+      // known symbolic link.  no need to stat again.
+      return gotResolvedLink(cache[base]);
+    }
+
+    return fs.lstat(base, gotStat);
+  }
+
+  function gotStat(err, stat) {
+    if (err) return cb(err);
+
+    // if not a symlink, skip to the next path part
+    if (!stat.isSymbolicLink()) {
+      knownHard[base] = true;
+      if (cache) cache[base] = base;
+      return process.nextTick(LOOP);
+    }
+
+    // stat & read the link if not read before
+    // call gotTarget as soon as the link target is known
+    // dev/ino always return 0 on windows, so skip the check.
+    if (!isWindows) {
+      var id = stat.dev.toString(32) + ':' + stat.ino.toString(32);
+      if (seenLinks.hasOwnProperty(id)) {
+        return gotTarget(null, seenLinks[id], base);
+      }
+    }
+    fs.stat(base, function(err) {
+      if (err) return cb(err);
+
+      fs.readlink(base, function(err, target) {
+        if (!isWindows) seenLinks[id] = target;
+        gotTarget(err, target);
+      });
+    });
+  }
+
+  function gotTarget(err, target, base) {
+    if (err) return cb(err);
+
+    var resolvedLink = pathModule.resolve(previous, target);
+    if (cache) cache[base] = resolvedLink;
+    gotResolvedLink(resolvedLink);
+  }
+
+  function gotResolvedLink(resolvedLink) {
+    // resolve the link, then start over
+    p = pathModule.resolve(resolvedLink, p.slice(pos));
+    start();
+  }
+};
+
+
+/***/ }),
+
+/***/ 129:
+/***/ (function(module) {
+
+module.exports = require("child_process");
+
+/***/ }),
+
+/***/ 131:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let populate = __webpack_require__(631)
+
+module.exports = function configureWS ({ arc, inventory }) {
+  if (!arc.ws) return null
+
+  let ws = [ ...arc.ws ]
+
+  // Backfill required routes if not already present
+  let defaults = [ 'disconnect', 'default', 'connect' ]
+  defaults.forEach(route => {
+    let found = arc.ws.find(item => {
+      if (item === route) return true
+      if (item[route]) return true
+    })
+    if (!found) ws.unshift(route)
+  })
+
+  let websockets = populate.ws(ws, inventory)
+
+  return websockets
+}
+
+
+/***/ }),
+
+/***/ 150:
+/***/ (function(module) {
+
+module.exports = function configureIndexes ({ arc }) {
+  if (!arc.indexes || !arc.indexes.length) return null
+
+  let isPrimaryKey = val => val.startsWith('*String') || val.startsWith('*Number')
+  let isSortKey = val => val.startsWith('**String') || val.startsWith('**Number')
+  let isCustomName = key => key.toLowerCase() === 'name'
+  function error (item) { throw Error(`Invalid @indexes item: ${item}`) }
+
+  let indexes = arc.indexes.map(index => {
+    if (typeof index === 'object' && !Array.isArray(index)) {
+      let name = Object.keys(index)[0]
+      let partitionKey = null
+      let partitionKeyType = null
+      let sortKey = null
+      let sortKeyType = null
+      let indexName = null
+      Object.entries(index[name]).forEach(([ key, value ]) => {
+        let isStr = typeof value === 'string'
+        if (isStr && isSortKey(value)) {
+          sortKey = key
+          sortKeyType = value.replace('**', '')
+        }
+        else if (isStr && isPrimaryKey(value)) {
+          partitionKey = key
+          partitionKeyType = value.replace('*', '')
+        }
+        else if (isStr && isCustomName(key)) {
+          indexName = value
+        }
+        else error(index)
+      })
+      return {
+        indexName,
+        name,
+        partitionKey,
+        partitionKeyType,
+        sortKey,
+        sortKeyType,
+      }
+    }
+    error(index)
+  })
+
+  return indexes
+}
+
+
+/***/ }),
+
 /***/ 154:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
@@ -387,7 +1865,7 @@ let plugins = __webpack_require__(799)
 /**
  * Get the project-level configuration, overlaying arc.aws settings (if present)
  */
-module.exports = function getProjectConfig (params, errors) {
+module.exports = function getProjectConfig (params) {
   let { arc, raw, filepath, inventory } = params
   let project = {
     ...inventory._project,
@@ -405,19 +1883,18 @@ module.exports = function getProjectConfig (params, errors) {
   }
 
   // require project plugin modules
-  project.plugins = plugins(project, errors)
+  project.plugins = plugins(project)
 
   // parse local and global arc preferences
   let scopes = [ 'global', 'local' ]
   for (let scope of scopes) {
-    let p = prefs({ scope, inventory, errors })
+    let p = prefs({ scope, inventory })
     if (p) {
       // Set up the scoped metadata
       project[`${scope}Preferences`] = p.preferences
       project[`${scope}PreferencesFile`] = p.preferencesFile
 
       // Build out the final preferences
-      /* istanbul ignore else */ // jic
       if (!project.preferences) project.preferences = {}
       Object.keys(p.preferences).forEach(pragma => {
         // Ignore the raw data
@@ -428,7 +1905,6 @@ module.exports = function getProjectConfig (params, errors) {
           return
         }
         // Traverse and merge individual settings
-        /* istanbul ignore else */ // jic
         if (!project.preferences[pragma]) project.preferences[pragma] = {}
         Object.entries(p.preferences[pragma]).forEach(([ setting, value ]) => {
           project.preferences[pragma][setting] = value
@@ -450,12 +1926,13 @@ module.exports = function getProjectConfig (params, errors) {
  * Ensure @tables children (@streams, @indexes) have parent tables present
  * - If not, configuration is invalid
  */
-module.exports = function validateTablesChildren (inventory, errors) {
+module.exports = function validateTablesChildren (inventory, callback) {
   let { indexes, streams, tables } = inventory
+  let err = []
 
   function check (table, type) {
     if (!tables.some(t => t.name === table)) {
-      errors.push(`@${type} ${table} missing corresponding table`)
+      err.push(`@${type} item missing corresponding table: ${table}`)
     }
   }
   if (streams) {
@@ -464,6 +1941,9 @@ module.exports = function validateTablesChildren (inventory, errors) {
   if (indexes) {
     indexes.forEach(index => check(index.name, 'indexes'))
   }
+
+  if (err.length) callback(Error(err.join('\n')))
+  else callback()
 }
 
 
@@ -525,6 +2005,103 @@ module.exports = function compact (tokens) {
 
 /***/ }),
 
+/***/ 158:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let { join } = __webpack_require__(622)
+let populate = __webpack_require__(631)
+let asapSrc = __webpack_require__(708)
+
+module.exports = function configureHTTP ({ arc, inventory }) {
+  if (!arc.http) return null
+
+  // Populate normally returns null on an empty Lambda pragma
+  // However, @http is special because it gets the Architect Static Asset Proxy (ASAP), so fall back to an empty array
+  let http = populate.http(arc.http, inventory) || []
+
+  let findRoot = route => {
+    let r = route.name.split(' ')
+    let method = r[0]
+    let path = r[1]
+    let rootParam = path.startsWith('/:') && path.split('/').length === 2
+    let isRootMethod = method === 'get' || method === 'any'
+    let isRootPath = path === '/' || path === '/*' || rootParam
+    return isRootMethod && isRootPath
+  }
+  let rootHandler = http.some(findRoot) ? 'configured' : 'arcStaticAssetProxy'
+  if (arc.proxy) rootHandler = 'proxy'
+  if (rootHandler === 'arcStaticAssetProxy') {
+    let src = asapSrc()
+
+    // Inject ASAP
+    let asap = {
+      name: 'get /*',
+      config: { ...inventory._arc.defaultFunctionConfig },
+      src,
+      handlerFile: join(src, 'index.js'),
+      handlerFunction: 'handler',
+      configFile: null,
+      arcStaticAssetProxy: true,
+      method: 'get',
+      path: '/*'
+    }
+    asap.config.shared = false
+    asap.config.views = false
+    inventory._project.asapSrc = src // Handy shortcut to ASAP
+    http.unshift(asap)
+  }
+
+  // Impure but it's way less complicated to just do this
+  inventory._project.rootHandler = rootHandler
+
+  return http
+}
+
+
+/***/ }),
+
+/***/ 161:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let restore = __webpack_require__(599)
+let isCI = process.env.CI || !process.stdout.isTTY
+let out = process.stdout
+let printer = {
+  // Clears the line so we can overwrite it
+  clear: () => {
+    if (!isCI)
+      out.clearLine()
+  },
+  // Resets cursor position
+  reset: x => {
+    if (!isCI)
+      out.cursorTo(x ? x : 0)
+  },
+  // Write to console, add single extra line to buffer while running
+  restoreCursor: () => restore(),
+  write: t => out.write(t + '\033[1A' + '\n')
+}
+printer.hideCursor = () => printer.write('\u001B[?25l')
+
+let isWin = process.platform.startsWith('win')
+let windows = '| / – \\ | / – \\'.split(' ')
+let unix = '⊙ ⦾ ⦿ ⦿ ⦿ ⦾ ⊙ ⊙ ⊙ ⊙'.split(' ')
+let frames = isWin
+  ? windows
+  : unix
+let timing = isWin
+  ? 125
+  : 100
+let spinner = { frames, timing }
+
+module.exports = {
+  printer,
+  spinner
+}
+
+
+/***/ }),
+
 /***/ 185:
 /***/ (function(module) {
 
@@ -555,24 +2132,112 @@ module.exports = class UnknownCharacterError extends SyntaxError {
 
 /***/ }),
 
+/***/ 219:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let asapSrc = __webpack_require__(708)
+
+module.exports = function configureStatic ({ arc, inventory }) {
+  // @static is inferred by @http
+  if (!arc.static && !arc.http) return null
+
+  let staticPragma = arc.static || []
+  let _static = {
+    fingerprint: null,
+    folder: 'public', // Arc applied default
+    ignore: null,
+    prefix: null,
+    prune: null,
+    spa: false, // Arc applied default
+    staging: null,
+    production: null,
+  }
+
+  if (Array.isArray(arc.static)) {
+    let disabled = [ false, 'disable', 'disabled' ]
+    let isDisabled = disabled.some(s => s === arc.static[0])
+    if (isDisabled) return false
+  }
+
+  let settings = Object.entries(_static).map(([ setting ]) => setting)
+  for (let setting of staticPragma) {
+    let validSetting = key => settings.some(s => s === key)
+    if (setting.ignore) {
+      _static.ignore = setting.ignore
+    }
+    else if (Array.isArray(setting) &&
+             setting.length === 2 &&
+             validSetting(setting[0])) {
+      let isIgnore = setting[0] === 'ignore'
+      _static[setting[0]] = isIgnore ? [ setting[1] ] : setting[1]
+    }
+  }
+
+  // Handy shortcut to ASAP for bare @static
+  if (!arc.http) {
+    inventory._project.rootHandler = 'arcStaticAssetProxy'
+    inventory._project.asapSrc = asapSrc()
+  }
+
+  return _static
+}
+
+
+/***/ }),
+
+/***/ 221:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let { join } = __webpack_require__(622)
+
+module.exports = function populateWebSockets ({ item, dir, cwd }) {
+  if (typeof item === 'string') {
+    let name = item
+    let route = name // Same as name, just what AWS calls it
+    let folder = process.env.DEPRECATED ? `ws-${name}` : name
+    let src = join(cwd, dir, folder)
+    return { name, route, src }
+  }
+  else if (typeof item === 'object' && !Array.isArray(item)) {
+    let name = Object.keys(item)[0]
+    let route = name
+    // Add back src switch on presence of item[name].src when WS gets more options
+    let src = join(cwd, item[name].src)
+    return { name, route, src }
+  }
+  throw Error(`Invalid @ws item: ${item}`)
+}
+
+
+/***/ }),
+
 /***/ 234:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
-let { all: allPragmas } = __webpack_require__(876)
-
-// Get all pragmas except special cases
-let isSpecial = p => p === 'shared' || p === 'views'
-let visitors = allPragmas.map(p => {
-  // eslint-disable-next-line
-  if (!isSpecial(p)) return require(`./${p}`)
-}).filter(Boolean)
-
+/* eslint-disable global-require */
+let visitors = [
+  __webpack_require__(359),       // @app
+  __webpack_require__(729),       // @aws
+  __webpack_require__(846),       // @cdn
+  __webpack_require__(90),    // @events
+  __webpack_require__(158),      // @http
+  __webpack_require__(150),   // @indexes
+  __webpack_require__(484),    // @macros
+  __webpack_require__(828),     // @proxy
+  __webpack_require__(840),   // @plugins - but only if they contain lambdas
+  __webpack_require__(525),    // @queues
+  __webpack_require__(346), // @scheduled
+  __webpack_require__(219),    // @static
+  __webpack_require__(565),   // @streams
+  __webpack_require__(833),    // @tables
+  __webpack_require__(131),        // @ws
+]
 // Special order-dependent visitors that run in a second pass
 let srcDirs = __webpack_require__(498)
 let shared = __webpack_require__(653)
 let views = __webpack_require__(825)
 
-module.exports = function configureArcPragmas ({ arc, inventory }, errors) {
+module.exports = function configureArcPragmas ({ arc, inventory }) {
   if (inventory._project.type !== 'aws') {
     throw ReferenceError('Inventory can only configure pragmas for AWS projects')
   }
@@ -581,19 +2246,19 @@ module.exports = function configureArcPragmas ({ arc, inventory }, errors) {
   visitors.forEach(visitor => {
     // Expects pragma visitors to have function name of: `configure${pragma}`
     let name = visitor.name.replace('configure', '').toLowerCase()
-    pragmas[name] = visitor({ arc, inventory, errors })
+    pragmas[name] = visitor({ arc, inventory })
   })
 
   // Lambda source directory list
-  let dirs = srcDirs({ pragmas, errors })
+  let dirs = srcDirs({ arc, inventory, pragmas })
   pragmas.lambdaSrcDirs = dirs.lambdaSrcDirs
   pragmas.lambdasBySrcDir = dirs.lambdasBySrcDir
 
   // @shared (which needs all Lambdae pragmas + srcDirs to validate)
-  pragmas.shared = shared({ arc, pragmas, inventory, errors })
+  pragmas.shared = shared({ arc, pragmas, inventory })
 
   // @views (which needs @http to validate)
-  pragmas.views = views({ arc, pragmas, inventory, errors })
+  pragmas.views = views({ arc, pragmas, inventory })
 
   return pragmas
 }
@@ -4759,6 +6424,993 @@ module.exports = (function() {
 
 /***/ }),
 
+/***/ 245:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+module.exports = globSync
+globSync.GlobSync = GlobSync
+
+var fs = __webpack_require__(747)
+var rp = __webpack_require__(302)
+var minimatch = __webpack_require__(93)
+var Minimatch = minimatch.Minimatch
+var Glob = __webpack_require__(402).Glob
+var util = __webpack_require__(669)
+var path = __webpack_require__(622)
+var assert = __webpack_require__(357)
+var isAbsolute = __webpack_require__(681)
+var common = __webpack_require__(856)
+var setopts = common.setopts
+var ownProp = common.ownProp
+var childrenIgnored = common.childrenIgnored
+var isIgnored = common.isIgnored
+
+function globSync (pattern, options) {
+  if (typeof options === 'function' || arguments.length === 3)
+    throw new TypeError('callback provided to sync glob\n'+
+                        'See: https://github.com/isaacs/node-glob/issues/167')
+
+  return new GlobSync(pattern, options).found
+}
+
+function GlobSync (pattern, options) {
+  if (!pattern)
+    throw new Error('must provide pattern')
+
+  if (typeof options === 'function' || arguments.length === 3)
+    throw new TypeError('callback provided to sync glob\n'+
+                        'See: https://github.com/isaacs/node-glob/issues/167')
+
+  if (!(this instanceof GlobSync))
+    return new GlobSync(pattern, options)
+
+  setopts(this, pattern, options)
+
+  if (this.noprocess)
+    return this
+
+  var n = this.minimatch.set.length
+  this.matches = new Array(n)
+  for (var i = 0; i < n; i ++) {
+    this._process(this.minimatch.set[i], i, false)
+  }
+  this._finish()
+}
+
+GlobSync.prototype._finish = function () {
+  assert(this instanceof GlobSync)
+  if (this.realpath) {
+    var self = this
+    this.matches.forEach(function (matchset, index) {
+      var set = self.matches[index] = Object.create(null)
+      for (var p in matchset) {
+        try {
+          p = self._makeAbs(p)
+          var real = rp.realpathSync(p, self.realpathCache)
+          set[real] = true
+        } catch (er) {
+          if (er.syscall === 'stat')
+            set[self._makeAbs(p)] = true
+          else
+            throw er
+        }
+      }
+    })
+  }
+  common.finish(this)
+}
+
+
+GlobSync.prototype._process = function (pattern, index, inGlobStar) {
+  assert(this instanceof GlobSync)
+
+  // Get the first [n] parts of pattern that are all strings.
+  var n = 0
+  while (typeof pattern[n] === 'string') {
+    n ++
+  }
+  // now n is the index of the first one that is *not* a string.
+
+  // See if there's anything else
+  var prefix
+  switch (n) {
+    // if not, then this is rather simple
+    case pattern.length:
+      this._processSimple(pattern.join('/'), index)
+      return
+
+    case 0:
+      // pattern *starts* with some non-trivial item.
+      // going to readdir(cwd), but not include the prefix in matches.
+      prefix = null
+      break
+
+    default:
+      // pattern has some string bits in the front.
+      // whatever it starts with, whether that's 'absolute' like /foo/bar,
+      // or 'relative' like '../baz'
+      prefix = pattern.slice(0, n).join('/')
+      break
+  }
+
+  var remain = pattern.slice(n)
+
+  // get the list of entries.
+  var read
+  if (prefix === null)
+    read = '.'
+  else if (isAbsolute(prefix) || isAbsolute(pattern.join('/'))) {
+    if (!prefix || !isAbsolute(prefix))
+      prefix = '/' + prefix
+    read = prefix
+  } else
+    read = prefix
+
+  var abs = this._makeAbs(read)
+
+  //if ignored, skip processing
+  if (childrenIgnored(this, read))
+    return
+
+  var isGlobStar = remain[0] === minimatch.GLOBSTAR
+  if (isGlobStar)
+    this._processGlobStar(prefix, read, abs, remain, index, inGlobStar)
+  else
+    this._processReaddir(prefix, read, abs, remain, index, inGlobStar)
+}
+
+
+GlobSync.prototype._processReaddir = function (prefix, read, abs, remain, index, inGlobStar) {
+  var entries = this._readdir(abs, inGlobStar)
+
+  // if the abs isn't a dir, then nothing can match!
+  if (!entries)
+    return
+
+  // It will only match dot entries if it starts with a dot, or if
+  // dot is set.  Stuff like @(.foo|.bar) isn't allowed.
+  var pn = remain[0]
+  var negate = !!this.minimatch.negate
+  var rawGlob = pn._glob
+  var dotOk = this.dot || rawGlob.charAt(0) === '.'
+
+  var matchedEntries = []
+  for (var i = 0; i < entries.length; i++) {
+    var e = entries[i]
+    if (e.charAt(0) !== '.' || dotOk) {
+      var m
+      if (negate && !prefix) {
+        m = !e.match(pn)
+      } else {
+        m = e.match(pn)
+      }
+      if (m)
+        matchedEntries.push(e)
+    }
+  }
+
+  var len = matchedEntries.length
+  // If there are no matched entries, then nothing matches.
+  if (len === 0)
+    return
+
+  // if this is the last remaining pattern bit, then no need for
+  // an additional stat *unless* the user has specified mark or
+  // stat explicitly.  We know they exist, since readdir returned
+  // them.
+
+  if (remain.length === 1 && !this.mark && !this.stat) {
+    if (!this.matches[index])
+      this.matches[index] = Object.create(null)
+
+    for (var i = 0; i < len; i ++) {
+      var e = matchedEntries[i]
+      if (prefix) {
+        if (prefix.slice(-1) !== '/')
+          e = prefix + '/' + e
+        else
+          e = prefix + e
+      }
+
+      if (e.charAt(0) === '/' && !this.nomount) {
+        e = path.join(this.root, e)
+      }
+      this._emitMatch(index, e)
+    }
+    // This was the last one, and no stats were needed
+    return
+  }
+
+  // now test all matched entries as stand-ins for that part
+  // of the pattern.
+  remain.shift()
+  for (var i = 0; i < len; i ++) {
+    var e = matchedEntries[i]
+    var newPattern
+    if (prefix)
+      newPattern = [prefix, e]
+    else
+      newPattern = [e]
+    this._process(newPattern.concat(remain), index, inGlobStar)
+  }
+}
+
+
+GlobSync.prototype._emitMatch = function (index, e) {
+  if (isIgnored(this, e))
+    return
+
+  var abs = this._makeAbs(e)
+
+  if (this.mark)
+    e = this._mark(e)
+
+  if (this.absolute) {
+    e = abs
+  }
+
+  if (this.matches[index][e])
+    return
+
+  if (this.nodir) {
+    var c = this.cache[abs]
+    if (c === 'DIR' || Array.isArray(c))
+      return
+  }
+
+  this.matches[index][e] = true
+
+  if (this.stat)
+    this._stat(e)
+}
+
+
+GlobSync.prototype._readdirInGlobStar = function (abs) {
+  // follow all symlinked directories forever
+  // just proceed as if this is a non-globstar situation
+  if (this.follow)
+    return this._readdir(abs, false)
+
+  var entries
+  var lstat
+  var stat
+  try {
+    lstat = fs.lstatSync(abs)
+  } catch (er) {
+    if (er.code === 'ENOENT') {
+      // lstat failed, doesn't exist
+      return null
+    }
+  }
+
+  var isSym = lstat && lstat.isSymbolicLink()
+  this.symlinks[abs] = isSym
+
+  // If it's not a symlink or a dir, then it's definitely a regular file.
+  // don't bother doing a readdir in that case.
+  if (!isSym && lstat && !lstat.isDirectory())
+    this.cache[abs] = 'FILE'
+  else
+    entries = this._readdir(abs, false)
+
+  return entries
+}
+
+GlobSync.prototype._readdir = function (abs, inGlobStar) {
+  var entries
+
+  if (inGlobStar && !ownProp(this.symlinks, abs))
+    return this._readdirInGlobStar(abs)
+
+  if (ownProp(this.cache, abs)) {
+    var c = this.cache[abs]
+    if (!c || c === 'FILE')
+      return null
+
+    if (Array.isArray(c))
+      return c
+  }
+
+  try {
+    return this._readdirEntries(abs, fs.readdirSync(abs))
+  } catch (er) {
+    this._readdirError(abs, er)
+    return null
+  }
+}
+
+GlobSync.prototype._readdirEntries = function (abs, entries) {
+  // if we haven't asked to stat everything, then just
+  // assume that everything in there exists, so we can avoid
+  // having to stat it a second time.
+  if (!this.mark && !this.stat) {
+    for (var i = 0; i < entries.length; i ++) {
+      var e = entries[i]
+      if (abs === '/')
+        e = abs + e
+      else
+        e = abs + '/' + e
+      this.cache[e] = true
+    }
+  }
+
+  this.cache[abs] = entries
+
+  // mark and cache dir-ness
+  return entries
+}
+
+GlobSync.prototype._readdirError = function (f, er) {
+  // handle errors, and cache the information
+  switch (er.code) {
+    case 'ENOTSUP': // https://github.com/isaacs/node-glob/issues/205
+    case 'ENOTDIR': // totally normal. means it *does* exist.
+      var abs = this._makeAbs(f)
+      this.cache[abs] = 'FILE'
+      if (abs === this.cwdAbs) {
+        var error = new Error(er.code + ' invalid cwd ' + this.cwd)
+        error.path = this.cwd
+        error.code = er.code
+        throw error
+      }
+      break
+
+    case 'ENOENT': // not terribly unusual
+    case 'ELOOP':
+    case 'ENAMETOOLONG':
+    case 'UNKNOWN':
+      this.cache[this._makeAbs(f)] = false
+      break
+
+    default: // some unusual error.  Treat as failure.
+      this.cache[this._makeAbs(f)] = false
+      if (this.strict)
+        throw er
+      if (!this.silent)
+        console.error('glob error', er)
+      break
+  }
+}
+
+GlobSync.prototype._processGlobStar = function (prefix, read, abs, remain, index, inGlobStar) {
+
+  var entries = this._readdir(abs, inGlobStar)
+
+  // no entries means not a dir, so it can never have matches
+  // foo.txt/** doesn't match foo.txt
+  if (!entries)
+    return
+
+  // test without the globstar, and with every child both below
+  // and replacing the globstar.
+  var remainWithoutGlobStar = remain.slice(1)
+  var gspref = prefix ? [ prefix ] : []
+  var noGlobStar = gspref.concat(remainWithoutGlobStar)
+
+  // the noGlobStar pattern exits the inGlobStar state
+  this._process(noGlobStar, index, false)
+
+  var len = entries.length
+  var isSym = this.symlinks[abs]
+
+  // If it's a symlink, and we're in a globstar, then stop
+  if (isSym && inGlobStar)
+    return
+
+  for (var i = 0; i < len; i++) {
+    var e = entries[i]
+    if (e.charAt(0) === '.' && !this.dot)
+      continue
+
+    // these two cases enter the inGlobStar state
+    var instead = gspref.concat(entries[i], remainWithoutGlobStar)
+    this._process(instead, index, true)
+
+    var below = gspref.concat(entries[i], remain)
+    this._process(below, index, true)
+  }
+}
+
+GlobSync.prototype._processSimple = function (prefix, index) {
+  // XXX review this.  Shouldn't it be doing the mounting etc
+  // before doing stat?  kinda weird?
+  var exists = this._stat(prefix)
+
+  if (!this.matches[index])
+    this.matches[index] = Object.create(null)
+
+  // If it doesn't exist, then just mark the lack of results
+  if (!exists)
+    return
+
+  if (prefix && isAbsolute(prefix) && !this.nomount) {
+    var trail = /[\/\\]$/.test(prefix)
+    if (prefix.charAt(0) === '/') {
+      prefix = path.join(this.root, prefix)
+    } else {
+      prefix = path.resolve(this.root, prefix)
+      if (trail)
+        prefix += '/'
+    }
+  }
+
+  if (process.platform === 'win32')
+    prefix = prefix.replace(/\\/g, '/')
+
+  // Mark this as a match
+  this._emitMatch(index, prefix)
+}
+
+// Returns either 'DIR', 'FILE', or false
+GlobSync.prototype._stat = function (f) {
+  var abs = this._makeAbs(f)
+  var needDir = f.slice(-1) === '/'
+
+  if (f.length > this.maxLength)
+    return false
+
+  if (!this.stat && ownProp(this.cache, abs)) {
+    var c = this.cache[abs]
+
+    if (Array.isArray(c))
+      c = 'DIR'
+
+    // It exists, but maybe not how we need it
+    if (!needDir || c === 'DIR')
+      return c
+
+    if (needDir && c === 'FILE')
+      return false
+
+    // otherwise we have to stat, because maybe c=true
+    // if we know it exists, but not what it is.
+  }
+
+  var exists
+  var stat = this.statCache[abs]
+  if (!stat) {
+    var lstat
+    try {
+      lstat = fs.lstatSync(abs)
+    } catch (er) {
+      if (er && (er.code === 'ENOENT' || er.code === 'ENOTDIR')) {
+        this.statCache[abs] = false
+        return false
+      }
+    }
+
+    if (lstat && lstat.isSymbolicLink()) {
+      try {
+        stat = fs.statSync(abs)
+      } catch (er) {
+        stat = lstat
+      }
+    } else {
+      stat = lstat
+    }
+  }
+
+  this.statCache[abs] = stat
+
+  var c = true
+  if (stat)
+    c = stat.isDirectory() ? 'DIR' : 'FILE'
+
+  this.cache[abs] = this.cache[abs] || c
+
+  if (needDir && c === 'FILE')
+    return false
+
+  return c
+}
+
+GlobSync.prototype._mark = function (p) {
+  return common.mark(this, p)
+}
+
+GlobSync.prototype._makeAbs = function (f) {
+  return common.makeAbs(this, f)
+}
+
+
+/***/ }),
+
+/***/ 247:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+const os = __webpack_require__(87);
+const tty = __webpack_require__(867);
+const hasFlag = __webpack_require__(364);
+
+const {env} = process;
+
+let forceColor;
+if (hasFlag('no-color') ||
+	hasFlag('no-colors') ||
+	hasFlag('color=false') ||
+	hasFlag('color=never')) {
+	forceColor = 0;
+} else if (hasFlag('color') ||
+	hasFlag('colors') ||
+	hasFlag('color=true') ||
+	hasFlag('color=always')) {
+	forceColor = 1;
+}
+
+if ('FORCE_COLOR' in env) {
+	if (env.FORCE_COLOR === 'true') {
+		forceColor = 1;
+	} else if (env.FORCE_COLOR === 'false') {
+		forceColor = 0;
+	} else {
+		forceColor = env.FORCE_COLOR.length === 0 ? 1 : Math.min(parseInt(env.FORCE_COLOR, 10), 3);
+	}
+}
+
+function translateLevel(level) {
+	if (level === 0) {
+		return false;
+	}
+
+	return {
+		level,
+		hasBasic: true,
+		has256: level >= 2,
+		has16m: level >= 3
+	};
+}
+
+function supportsColor(haveStream, streamIsTTY) {
+	if (forceColor === 0) {
+		return 0;
+	}
+
+	if (hasFlag('color=16m') ||
+		hasFlag('color=full') ||
+		hasFlag('color=truecolor')) {
+		return 3;
+	}
+
+	if (hasFlag('color=256')) {
+		return 2;
+	}
+
+	if (haveStream && !streamIsTTY && forceColor === undefined) {
+		return 0;
+	}
+
+	const min = forceColor || 0;
+
+	if (env.TERM === 'dumb') {
+		return min;
+	}
+
+	if (process.platform === 'win32') {
+		// Windows 10 build 10586 is the first Windows release that supports 256 colors.
+		// Windows 10 build 14931 is the first release that supports 16m/TrueColor.
+		const osRelease = os.release().split('.');
+		if (
+			Number(osRelease[0]) >= 10 &&
+			Number(osRelease[2]) >= 10586
+		) {
+			return Number(osRelease[2]) >= 14931 ? 3 : 2;
+		}
+
+		return 1;
+	}
+
+	if ('CI' in env) {
+		if (['TRAVIS', 'CIRCLECI', 'APPVEYOR', 'GITLAB_CI', 'GITHUB_ACTIONS', 'BUILDKITE'].some(sign => sign in env) || env.CI_NAME === 'codeship') {
+			return 1;
+		}
+
+		return min;
+	}
+
+	if ('TEAMCITY_VERSION' in env) {
+		return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
+	}
+
+	if (env.COLORTERM === 'truecolor') {
+		return 3;
+	}
+
+	if ('TERM_PROGRAM' in env) {
+		const version = parseInt((env.TERM_PROGRAM_VERSION || '').split('.')[0], 10);
+
+		switch (env.TERM_PROGRAM) {
+			case 'iTerm.app':
+				return version >= 3 ? 3 : 2;
+			case 'Apple_Terminal':
+				return 2;
+			// No default
+		}
+	}
+
+	if (/-256(color)?$/i.test(env.TERM)) {
+		return 2;
+	}
+
+	if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) {
+		return 1;
+	}
+
+	if ('COLORTERM' in env) {
+		return 1;
+	}
+
+	return min;
+}
+
+function getSupportLevel(stream) {
+	const level = supportsColor(stream, stream && stream.isTTY);
+	return translateLevel(level);
+}
+
+module.exports = {
+	supportsColor: getSupportLevel,
+	stdout: translateLevel(supportsColor(true, tty.isatty(1))),
+	stderr: translateLevel(supportsColor(true, tty.isatty(2)))
+};
+
+
+/***/ }),
+
+/***/ 250:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+var constants = __webpack_require__(619)
+
+var origCwd = process.cwd
+var cwd = null
+
+var platform = process.env.GRACEFUL_FS_PLATFORM || process.platform
+
+process.cwd = function() {
+  if (!cwd)
+    cwd = origCwd.call(process)
+  return cwd
+}
+try {
+  process.cwd()
+} catch (er) {}
+
+// This check is needed until node.js 12 is required
+if (typeof process.chdir === 'function') {
+  var chdir = process.chdir
+  process.chdir = function (d) {
+    cwd = null
+    chdir.call(process, d)
+  }
+  if (Object.setPrototypeOf) Object.setPrototypeOf(process.chdir, chdir)
+}
+
+module.exports = patch
+
+function patch (fs) {
+  // (re-)implement some things that are known busted or missing.
+
+  // lchmod, broken prior to 0.6.2
+  // back-port the fix here.
+  if (constants.hasOwnProperty('O_SYMLINK') &&
+      process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
+    patchLchmod(fs)
+  }
+
+  // lutimes implementation, or no-op
+  if (!fs.lutimes) {
+    patchLutimes(fs)
+  }
+
+  // https://github.com/isaacs/node-graceful-fs/issues/4
+  // Chown should not fail on einval or eperm if non-root.
+  // It should not fail on enosys ever, as this just indicates
+  // that a fs doesn't support the intended operation.
+
+  fs.chown = chownFix(fs.chown)
+  fs.fchown = chownFix(fs.fchown)
+  fs.lchown = chownFix(fs.lchown)
+
+  fs.chmod = chmodFix(fs.chmod)
+  fs.fchmod = chmodFix(fs.fchmod)
+  fs.lchmod = chmodFix(fs.lchmod)
+
+  fs.chownSync = chownFixSync(fs.chownSync)
+  fs.fchownSync = chownFixSync(fs.fchownSync)
+  fs.lchownSync = chownFixSync(fs.lchownSync)
+
+  fs.chmodSync = chmodFixSync(fs.chmodSync)
+  fs.fchmodSync = chmodFixSync(fs.fchmodSync)
+  fs.lchmodSync = chmodFixSync(fs.lchmodSync)
+
+  fs.stat = statFix(fs.stat)
+  fs.fstat = statFix(fs.fstat)
+  fs.lstat = statFix(fs.lstat)
+
+  fs.statSync = statFixSync(fs.statSync)
+  fs.fstatSync = statFixSync(fs.fstatSync)
+  fs.lstatSync = statFixSync(fs.lstatSync)
+
+  // if lchmod/lchown do not exist, then make them no-ops
+  if (!fs.lchmod) {
+    fs.lchmod = function (path, mode, cb) {
+      if (cb) process.nextTick(cb)
+    }
+    fs.lchmodSync = function () {}
+  }
+  if (!fs.lchown) {
+    fs.lchown = function (path, uid, gid, cb) {
+      if (cb) process.nextTick(cb)
+    }
+    fs.lchownSync = function () {}
+  }
+
+  // on Windows, A/V software can lock the directory, causing this
+  // to fail with an EACCES or EPERM if the directory contains newly
+  // created files.  Try again on failure, for up to 60 seconds.
+
+  // Set the timeout this long because some Windows Anti-Virus, such as Parity
+  // bit9, may lock files for up to a minute, causing npm package install
+  // failures. Also, take care to yield the scheduler. Windows scheduling gives
+  // CPU to a busy looping process, which can cause the program causing the lock
+  // contention to be starved of CPU by node, so the contention doesn't resolve.
+  if (platform === "win32") {
+    fs.rename = (function (fs$rename) { return function (from, to, cb) {
+      var start = Date.now()
+      var backoff = 0;
+      fs$rename(from, to, function CB (er) {
+        if (er
+            && (er.code === "EACCES" || er.code === "EPERM")
+            && Date.now() - start < 60000) {
+          setTimeout(function() {
+            fs.stat(to, function (stater, st) {
+              if (stater && stater.code === "ENOENT")
+                fs$rename(from, to, CB);
+              else
+                cb(er)
+            })
+          }, backoff)
+          if (backoff < 100)
+            backoff += 10;
+          return;
+        }
+        if (cb) cb(er)
+      })
+    }})(fs.rename)
+  }
+
+  // if read() returns EAGAIN, then just try it again.
+  fs.read = (function (fs$read) {
+    function read (fd, buffer, offset, length, position, callback_) {
+      var callback
+      if (callback_ && typeof callback_ === 'function') {
+        var eagCounter = 0
+        callback = function (er, _, __) {
+          if (er && er.code === 'EAGAIN' && eagCounter < 10) {
+            eagCounter ++
+            return fs$read.call(fs, fd, buffer, offset, length, position, callback)
+          }
+          callback_.apply(this, arguments)
+        }
+      }
+      return fs$read.call(fs, fd, buffer, offset, length, position, callback)
+    }
+
+    // This ensures `util.promisify` works as it does for native `fs.read`.
+    if (Object.setPrototypeOf) Object.setPrototypeOf(read, fs$read)
+    return read
+  })(fs.read)
+
+  fs.readSync = (function (fs$readSync) { return function (fd, buffer, offset, length, position) {
+    var eagCounter = 0
+    while (true) {
+      try {
+        return fs$readSync.call(fs, fd, buffer, offset, length, position)
+      } catch (er) {
+        if (er.code === 'EAGAIN' && eagCounter < 10) {
+          eagCounter ++
+          continue
+        }
+        throw er
+      }
+    }
+  }})(fs.readSync)
+
+  function patchLchmod (fs) {
+    fs.lchmod = function (path, mode, callback) {
+      fs.open( path
+             , constants.O_WRONLY | constants.O_SYMLINK
+             , mode
+             , function (err, fd) {
+        if (err) {
+          if (callback) callback(err)
+          return
+        }
+        // prefer to return the chmod error, if one occurs,
+        // but still try to close, and report closing errors if they occur.
+        fs.fchmod(fd, mode, function (err) {
+          fs.close(fd, function(err2) {
+            if (callback) callback(err || err2)
+          })
+        })
+      })
+    }
+
+    fs.lchmodSync = function (path, mode) {
+      var fd = fs.openSync(path, constants.O_WRONLY | constants.O_SYMLINK, mode)
+
+      // prefer to return the chmod error, if one occurs,
+      // but still try to close, and report closing errors if they occur.
+      var threw = true
+      var ret
+      try {
+        ret = fs.fchmodSync(fd, mode)
+        threw = false
+      } finally {
+        if (threw) {
+          try {
+            fs.closeSync(fd)
+          } catch (er) {}
+        } else {
+          fs.closeSync(fd)
+        }
+      }
+      return ret
+    }
+  }
+
+  function patchLutimes (fs) {
+    if (constants.hasOwnProperty("O_SYMLINK")) {
+      fs.lutimes = function (path, at, mt, cb) {
+        fs.open(path, constants.O_SYMLINK, function (er, fd) {
+          if (er) {
+            if (cb) cb(er)
+            return
+          }
+          fs.futimes(fd, at, mt, function (er) {
+            fs.close(fd, function (er2) {
+              if (cb) cb(er || er2)
+            })
+          })
+        })
+      }
+
+      fs.lutimesSync = function (path, at, mt) {
+        var fd = fs.openSync(path, constants.O_SYMLINK)
+        var ret
+        var threw = true
+        try {
+          ret = fs.futimesSync(fd, at, mt)
+          threw = false
+        } finally {
+          if (threw) {
+            try {
+              fs.closeSync(fd)
+            } catch (er) {}
+          } else {
+            fs.closeSync(fd)
+          }
+        }
+        return ret
+      }
+
+    } else {
+      fs.lutimes = function (_a, _b, _c, cb) { if (cb) process.nextTick(cb) }
+      fs.lutimesSync = function () {}
+    }
+  }
+
+  function chmodFix (orig) {
+    if (!orig) return orig
+    return function (target, mode, cb) {
+      return orig.call(fs, target, mode, function (er) {
+        if (chownErOk(er)) er = null
+        if (cb) cb.apply(this, arguments)
+      })
+    }
+  }
+
+  function chmodFixSync (orig) {
+    if (!orig) return orig
+    return function (target, mode) {
+      try {
+        return orig.call(fs, target, mode)
+      } catch (er) {
+        if (!chownErOk(er)) throw er
+      }
+    }
+  }
+
+
+  function chownFix (orig) {
+    if (!orig) return orig
+    return function (target, uid, gid, cb) {
+      return orig.call(fs, target, uid, gid, function (er) {
+        if (chownErOk(er)) er = null
+        if (cb) cb.apply(this, arguments)
+      })
+    }
+  }
+
+  function chownFixSync (orig) {
+    if (!orig) return orig
+    return function (target, uid, gid) {
+      try {
+        return orig.call(fs, target, uid, gid)
+      } catch (er) {
+        if (!chownErOk(er)) throw er
+      }
+    }
+  }
+
+  function statFix (orig) {
+    if (!orig) return orig
+    // Older versions of Node erroneously returned signed integers for
+    // uid + gid.
+    return function (target, options, cb) {
+      if (typeof options === 'function') {
+        cb = options
+        options = null
+      }
+      function callback (er, stats) {
+        if (stats) {
+          if (stats.uid < 0) stats.uid += 0x100000000
+          if (stats.gid < 0) stats.gid += 0x100000000
+        }
+        if (cb) cb.apply(this, arguments)
+      }
+      return options ? orig.call(fs, target, options, callback)
+        : orig.call(fs, target, callback)
+    }
+  }
+
+  function statFixSync (orig) {
+    if (!orig) return orig
+    // Older versions of Node erroneously returned signed integers for
+    // uid + gid.
+    return function (target, options) {
+      var stats = options ? orig.call(fs, target, options)
+        : orig.call(fs, target)
+      if (stats.uid < 0) stats.uid += 0x100000000
+      if (stats.gid < 0) stats.gid += 0x100000000
+      return stats;
+    }
+  }
+
+  // ENOSYS means that the fs doesn't support the op. Just ignore
+  // that, because it doesn't matter.
+  //
+  // if there's no getuid, or if getuid() is something other
+  // than 0, and the error is EINVAL or EPERM, then just ignore
+  // it.
+  //
+  // This specific case is a silent failure in cp, install, tar,
+  // and most other unix tools that manage permissions.
+  //
+  // When running as root, or if other types of errors are
+  // encountered, then it's strict.
+  function chownErOk (er) {
+    if (!er)
+      return true
+
+    if (er.code === "ENOSYS")
+      return true
+
+    var nonroot = !process.getuid || process.getuid() !== 0
+    if (nonroot) {
+      if (er.code === "EINVAL" || er.code === "EPERM")
+        return true
+    }
+
+    return false
+  }
+}
+
+
+/***/ }),
+
 /***/ 259:
 /***/ (function(module) {
 
@@ -4774,6 +7426,140 @@ module.exports = class PragmaNotFound extends ReferenceError {
 
 /***/ }),
 
+/***/ 260:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+const conversions = __webpack_require__(445);
+
+/*
+	This function routes a model to all other models.
+
+	all functions that are routed have a property `.conversion` attached
+	to the returned synthetic function. This property is an array
+	of strings, each with the steps in between the 'from' and 'to'
+	color models (inclusive).
+
+	conversions that are not possible simply are not included.
+*/
+
+function buildGraph() {
+	const graph = {};
+	// https://jsperf.com/object-keys-vs-for-in-with-closure/3
+	const models = Object.keys(conversions);
+
+	for (let len = models.length, i = 0; i < len; i++) {
+		graph[models[i]] = {
+			// http://jsperf.com/1-vs-infinity
+			// micro-opt, but this is simple.
+			distance: -1,
+			parent: null
+		};
+	}
+
+	return graph;
+}
+
+// https://en.wikipedia.org/wiki/Breadth-first_search
+function deriveBFS(fromModel) {
+	const graph = buildGraph();
+	const queue = [fromModel]; // Unshift -> queue -> pop
+
+	graph[fromModel].distance = 0;
+
+	while (queue.length) {
+		const current = queue.pop();
+		const adjacents = Object.keys(conversions[current]);
+
+		for (let len = adjacents.length, i = 0; i < len; i++) {
+			const adjacent = adjacents[i];
+			const node = graph[adjacent];
+
+			if (node.distance === -1) {
+				node.distance = graph[current].distance + 1;
+				node.parent = current;
+				queue.unshift(adjacent);
+			}
+		}
+	}
+
+	return graph;
+}
+
+function link(from, to) {
+	return function (args) {
+		return to(from(args));
+	};
+}
+
+function wrapConversion(toModel, graph) {
+	const path = [graph[toModel].parent, toModel];
+	let fn = conversions[graph[toModel].parent][toModel];
+
+	let cur = graph[toModel].parent;
+	while (graph[cur].parent) {
+		path.unshift(graph[cur].parent);
+		fn = link(conversions[graph[cur].parent][cur], fn);
+		cur = graph[cur].parent;
+	}
+
+	fn.conversion = path;
+	return fn;
+}
+
+module.exports = function (fromModel) {
+	const graph = deriveBFS(fromModel);
+	const conversion = {};
+
+	const models = Object.keys(graph);
+	for (let len = models.length, i = 0; i < len; i++) {
+		const toModel = models[i];
+		const node = graph[toModel];
+
+		if (node.parent === null) {
+			// No possible conversion, or this node is the source model.
+			continue;
+		}
+
+		conversion[toModel] = wrapConversion(toModel, graph);
+	}
+
+	return conversion;
+};
+
+
+
+/***/ }),
+
+/***/ 295:
+/***/ (function(module) {
+
+let patterns = {
+  looseName: new RegExp(/^[a-z][a-zA-Z0-9-_]+$/),
+  strictName: new RegExp(/^[a-z][a-z0-9-]+$/),
+}
+
+function regex (value, pattern, pragma) {
+  let matching = typeof pattern === 'string' ? patterns[pattern] : pattern
+  if (!matching.test(value)) {
+    throw Error(`Invalid ${pragma} value: ${value} must match ${pattern}`)
+  }
+}
+
+function size (value, num, pragma) {
+  if (typeof value !== 'string') throw Error(`Value must be a string: ${value}`)
+  if (typeof num !== 'number') throw Error(`validate.size requires a number: ${num}`)
+  if (value.length > num) throw Error(`Invalid ${pragma} value: ${value} must less than ${num} characters`)
+}
+
+module.exports = {
+  patterns,
+  regex,
+  size,
+}
+
+
+/***/ }),
+
 /***/ 300:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
@@ -4783,15 +7569,84 @@ module.exports = {
   // Types
   array: item => Array.isArray(item),
   bool: item => typeof item === 'boolean',
-  number: item => typeof item === 'number',
   object: item => typeof item === 'object' && !Array.isArray(item),
   string: item => typeof item === 'string',
   // Filesystem
   exists: path => existsSync(path),
-  folder: path => existsSync(path) && lstatSync(path).isDirectory(),
-  // Pragma-specific stuff
-  primaryKey: val => typeof val === 'string' && (val.startsWith('*String') || val.startsWith('*Number')),
-  sortKey: val => typeof val === 'string' && (val.startsWith('**String') || val.startsWith('**Number')),
+  folder: path => lstatSync(path).isDirectory(),
+}
+
+
+/***/ }),
+
+/***/ 302:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+module.exports = realpath
+realpath.realpath = realpath
+realpath.sync = realpathSync
+realpath.realpathSync = realpathSync
+realpath.monkeypatch = monkeypatch
+realpath.unmonkeypatch = unmonkeypatch
+
+var fs = __webpack_require__(747)
+var origRealpath = fs.realpath
+var origRealpathSync = fs.realpathSync
+
+var version = process.version
+var ok = /^v[0-5]\./.test(version)
+var old = __webpack_require__(117)
+
+function newError (er) {
+  return er && er.syscall === 'realpath' && (
+    er.code === 'ELOOP' ||
+    er.code === 'ENOMEM' ||
+    er.code === 'ENAMETOOLONG'
+  )
+}
+
+function realpath (p, cache, cb) {
+  if (ok) {
+    return origRealpath(p, cache, cb)
+  }
+
+  if (typeof cache === 'function') {
+    cb = cache
+    cache = null
+  }
+  origRealpath(p, cache, function (er, result) {
+    if (newError(er)) {
+      old.realpath(p, cache, cb)
+    } else {
+      cb(er, result)
+    }
+  })
+}
+
+function realpathSync (p, cache) {
+  if (ok) {
+    return origRealpathSync(p, cache)
+  }
+
+  try {
+    return origRealpathSync(p, cache)
+  } catch (er) {
+    if (newError(er)) {
+      return old.realpathSync(p, cache)
+    } else {
+      throw er
+    }
+  }
+}
+
+function monkeypatch () {
+  fs.realpath = realpath
+  fs.realpathSync = realpathSync
+}
+
+function unmonkeypatch () {
+  fs.realpath = origRealpath
+  fs.realpathSync = origRealpathSync
 }
 
 
@@ -4861,7 +7716,7 @@ module.exports = function upsertProps (config, newConfig) {
       if (Array.isArray(value)) policies = policies.concat(value)
       else policies.push(value)
     }
-    else {
+    else if (typeof value !== 'undefined') {
       props[name] = value
     }
   }
@@ -4876,83 +7731,312 @@ module.exports = function upsertProps (config, newConfig) {
 
 /***/ }),
 
-/***/ 315:
+/***/ 306:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
-let { unique } = __webpack_require__(739)
+var concatMap = __webpack_require__(896);
+var balanced = __webpack_require__(621);
 
-module.exports = function validateHTTP (http, errors) {
-  if (http.length) {
-    unique(http, '@http routes', errors)
+module.exports = expandTop;
 
-    let methods = [ 'get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'any' ]
-    let validMethod = str => methods.some(m => m === str.toLowerCase())
-    let validPath = str => str.match(/^\/[a-zA-Z0-9/\-:._\*]*$/)
-    http.forEach(route => {
-      let { name, method, path } = route
-      if (!validMethod(method)) errors.push(`Invalid @http method: ${name}`)
-      if (!validPath(path)) {
-        let bad = path.slice().split('').filter(bads)
-        let uniq = {}
-        bad.forEach(b => { uniq[b] = true })
-        bad = Object.keys(uniq).join(', ')
-        if (bad.length > 0) {
-          errors.push(`Invalid @http path character${bad.length === 1 ? '' : 's'} (${bad}): ${name}`)
+var escSlash = '\0SLASH'+Math.random()+'\0';
+var escOpen = '\0OPEN'+Math.random()+'\0';
+var escClose = '\0CLOSE'+Math.random()+'\0';
+var escComma = '\0COMMA'+Math.random()+'\0';
+var escPeriod = '\0PERIOD'+Math.random()+'\0';
+
+function numeric(str) {
+  return parseInt(str, 10) == str
+    ? parseInt(str, 10)
+    : str.charCodeAt(0);
+}
+
+function escapeBraces(str) {
+  return str.split('\\\\').join(escSlash)
+            .split('\\{').join(escOpen)
+            .split('\\}').join(escClose)
+            .split('\\,').join(escComma)
+            .split('\\.').join(escPeriod);
+}
+
+function unescapeBraces(str) {
+  return str.split(escSlash).join('\\')
+            .split(escOpen).join('{')
+            .split(escClose).join('}')
+            .split(escComma).join(',')
+            .split(escPeriod).join('.');
+}
+
+
+// Basically just str.split(","), but handling cases
+// where we have nested braced sections, which should be
+// treated as individual members, like {a,{b,c},d}
+function parseCommaParts(str) {
+  if (!str)
+    return [''];
+
+  var parts = [];
+  var m = balanced('{', '}', str);
+
+  if (!m)
+    return str.split(',');
+
+  var pre = m.pre;
+  var body = m.body;
+  var post = m.post;
+  var p = pre.split(',');
+
+  p[p.length-1] += '{' + body + '}';
+  var postParts = parseCommaParts(post);
+  if (post.length) {
+    p[p.length-1] += postParts.shift();
+    p.push.apply(p, postParts);
+  }
+
+  parts.push.apply(parts, p);
+
+  return parts;
+}
+
+function expandTop(str) {
+  if (!str)
+    return [];
+
+  // I don't know why Bash 4.3 does this, but it does.
+  // Anything starting with {} will have the first two bytes preserved
+  // but *only* at the top level, so {},a}b will not expand to anything,
+  // but a{},b}c will be expanded to [a}c,abc].
+  // One could argue that this is a bug in Bash, but since the goal of
+  // this module is to match Bash's rules, we escape a leading {}
+  if (str.substr(0, 2) === '{}') {
+    str = '\\{\\}' + str.substr(2);
+  }
+
+  return expand(escapeBraces(str), true).map(unescapeBraces);
+}
+
+function identity(e) {
+  return e;
+}
+
+function embrace(str) {
+  return '{' + str + '}';
+}
+function isPadded(el) {
+  return /^-?0\d/.test(el);
+}
+
+function lte(i, y) {
+  return i <= y;
+}
+function gte(i, y) {
+  return i >= y;
+}
+
+function expand(str, isTop) {
+  var expansions = [];
+
+  var m = balanced('{', '}', str);
+  if (!m || /\$$/.test(m.pre)) return [str];
+
+  var isNumericSequence = /^-?\d+\.\.-?\d+(?:\.\.-?\d+)?$/.test(m.body);
+  var isAlphaSequence = /^[a-zA-Z]\.\.[a-zA-Z](?:\.\.-?\d+)?$/.test(m.body);
+  var isSequence = isNumericSequence || isAlphaSequence;
+  var isOptions = m.body.indexOf(',') >= 0;
+  if (!isSequence && !isOptions) {
+    // {a},b}
+    if (m.post.match(/,.*\}/)) {
+      str = m.pre + '{' + m.body + escClose + m.post;
+      return expand(str);
+    }
+    return [str];
+  }
+
+  var n;
+  if (isSequence) {
+    n = m.body.split(/\.\./);
+  } else {
+    n = parseCommaParts(m.body);
+    if (n.length === 1) {
+      // x{{a,b}}y ==> x{a}y x{b}y
+      n = expand(n[0], false).map(embrace);
+      if (n.length === 1) {
+        var post = m.post.length
+          ? expand(m.post, false)
+          : [''];
+        return post.map(function(p) {
+          return m.pre + n[0] + p;
+        });
+      }
+    }
+  }
+
+  // at this point, n is the parts, and we know it's not a comma set
+  // with a single entry.
+
+  // no need to expand pre, since it is guaranteed to be free of brace-sets
+  var pre = m.pre;
+  var post = m.post.length
+    ? expand(m.post, false)
+    : [''];
+
+  var N;
+
+  if (isSequence) {
+    var x = numeric(n[0]);
+    var y = numeric(n[1]);
+    var width = Math.max(n[0].length, n[1].length)
+    var incr = n.length == 3
+      ? Math.abs(numeric(n[2]))
+      : 1;
+    var test = lte;
+    var reverse = y < x;
+    if (reverse) {
+      incr *= -1;
+      test = gte;
+    }
+    var pad = n.some(isPadded);
+
+    N = [];
+
+    for (var i = x; test(i, y); i += incr) {
+      var c;
+      if (isAlphaSequence) {
+        c = String.fromCharCode(i);
+        if (c === '\\')
+          c = '';
+      } else {
+        c = String(i);
+        if (pad) {
+          var need = width - c.length;
+          if (need > 0) {
+            var z = new Array(need + 1).join('0');
+            if (i < 0)
+              c = '-' + z + c.slice(1);
+            else
+              c = z + c;
+          }
         }
       }
+      N.push(c);
+    }
+  } else {
+    N = concatMap(n, function(el) { return expand(el, false) });
+  }
 
-      // Conditional for users creating a `get /` function
-      if (path.length > 1) {
+  for (var j = 0; j < N.length; j++) {
+    for (var k = 0; k < post.length; k++) {
+      var expansion = pre + N[j] + post[k];
+      if (!isTop || isSequence || expansion)
+        expansions.push(expansion);
+    }
+  }
 
-        // Somehow doesn't start with a slash
-        if (path[0] !== '/') {
-          errors.push(`Invalid @http path (must start with a slash): ${name}`)
-        }
+  return expansions;
+}
 
-        // Does not end with a slash
-        if (path.split('').reverse()[0] === '/') {
-          errors.push(`Invalid @http path (cannot end with '/'): ${name}`)
-        }
 
-        // Contains double slashes, i.e. //
-        if (path.match('//')) {
-          errors.push(`Invalid @http path (must have parts between two slashes): ${name}`)
-        }
 
-        // No trailing non-alphanumeric characters
-        let trailingSpecialChars = path.match(/[-\._]($|\/)/g)
-        if (trailingSpecialChars) {
-          errors.push(`Invalid @http path (parts cannot end with special characters): ${name}`)
-        }
+/***/ }),
+
+/***/ 314:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let chalk = __webpack_require__(843)
+let chars = __webpack_require__(438)
+let initAWS = __webpack_require__(546)
+
+module.exports = function printBanner (params = {}) {
+  let {
+    inventory,
+    disableBanner,
+    disableRegion,
+    disableProfile,
+    needsValidCreds,
+    version = '–'
+  } = params
+  let quiet = process.env.ARC_QUIET || process.env.QUIET
+
+  if (disableBanner) return
+  else {
+    // Boilerplate
+    let log = (label, value) => {
+      if (!quiet) {
+        console.log(chalk.grey(`${label.padStart(12)} ${chars.buzz}`), chalk.cyan(value))
       }
+    }
 
-      // Params always include `/:`
-      let params = path.match(/\/:/g)
-      if (params) {
-        // Params cannot have non-alphanumeric characters
-        let match = path.match(/\/:[a-zA-Z0-9]+(\/|$)/g)
-        if (!match) errors.push(`Invalid @http path (parameters must have only alphanumeric characters): ${name}`)
-      }
+    // Initialize config
+    process.env.ARC_APP_NAME = inventory.inv.app
+    initAWS({ inventory, needsValidCreds })
 
-      // Check to make sure `:` is ONLY used at the beginning of a path part
-      let invalidParamSyntax = path.match(/\/\w+:\w*/g)
-      if (invalidParamSyntax) {
-        errors.push(`Invalid @http path (parameters can only be used at the beginning of a path part): ${name}`)
-      }
+    // App name
+    let name = process.env.ARC_APP_NAME || 'Architect project manifest not found'
+    log('App', name)
 
-      // Catchalls must exist at the end of the path
-      let invalidCatchallSyntax = path.includes('*') && !path.match(/\/\*$/g)
-      if (invalidCatchallSyntax) {
-        errors.push(`Invalid @http path (catchalls can only be used at the end of a path): ${name}`)
-      }
-    })
+    // Region
+    let region = process.env.AWS_REGION || '@aws region / AWS_REGION not configured'
+    if (!disableRegion) {
+      log('Region', region)
+    }
+
+    // Profile
+    let profile = process.env.ARC_AWS_CREDS === 'env'
+      ? 'Set via environment'
+      : process.env.AWS_PROFILE || '@aws profile / AWS_PROFILE not configured'
+    if (!disableProfile) {
+      log('Profile', profile)
+    }
+
+    // Caller version
+    // Also: set deprecation status for legacy Arc installs
+    log('Version', version)
+    if (version.startsWith('Architect 5')) {
+      process.env.DEPRECATED = true
+    }
+
+    // cwd
+    log('cwd', process.cwd())
+
+    // Space
+    if (!quiet) {
+      console.log()
+    }
   }
 }
 
-// Paths can only have letters, numbers, dashes, slashes and/or :params
-function bads (c) {
-  let allowed = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/-:._*'.split('')
-  return !allowed.includes(c)
+
+/***/ }),
+
+/***/ 315:
+/***/ (function(module) {
+
+if (typeof Object.create === 'function') {
+  // implementation from standard node.js 'util' module
+  module.exports = function inherits(ctor, superCtor) {
+    if (superCtor) {
+      ctor.super_ = superCtor
+      ctor.prototype = Object.create(superCtor.prototype, {
+        constructor: {
+          value: ctor,
+          enumerable: false,
+          writable: true,
+          configurable: true
+        }
+      })
+    }
+  };
+} else {
+  // old school shim for old browsers
+  module.exports = function inherits(ctor, superCtor) {
+    if (superCtor) {
+      ctor.super_ = superCtor
+      var TempCtor = function () {}
+      TempCtor.prototype = superCtor.prototype
+      ctor.prototype = new TempCtor()
+      ctor.prototype.constructor = ctor
+    }
+  }
 }
 
 
@@ -5049,47 +8133,51 @@ function spaces (line) {
 /***/ 322:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
+let series = __webpack_require__(712)
 let layers = __webpack_require__(597)
 let tablesChildren = __webpack_require__(156)
-let errorFmt = __webpack_require__(377)
+let lambdaPragmas = __webpack_require__(517)
 
 /**
  * Final inventory validation
  */
-module.exports = function finalValidation (params, inventory) {
-  let errors = []
+module.exports = function validate (params, inventory, callback) {
+  let { region } = inventory.aws
+  let { cwd, validateLayers = true } = params
 
-  /**
-   * Deal with vendor configuration errors
-   */
+  // Walk the tree of layer configs, starting with @aws
+  let layerValidations = []
+  Object.entries(inventory).forEach(([ i ]) => {
+    let item = inventory[i]
+    if (i === 'aws') {
+      let location = inventory._project.manifest &&
+                     inventory._project.manifest.replace(cwd, '')
+      let layers = item.layers
+      layerValidations.push({ layers, region, location })
+    }
+    else if (lambdaPragmas.some(p => p === i) && item) {
+      item.forEach(entry => {
+        // Probably unnecessary if no configFile is present but why not, let's be extra safe
+        let location = entry.configFile && entry.configFile.replace(cwd, '')
+        let layers = entry.config.layers
+        layerValidations.push({ layers, region, location })
+      })
+    }
+  })
 
-  // Ensure layer configuration will work, AWS blows up with awful errors on this
-  layers(params, inventory, errors)
-
-  // TODO add deeper policy validation here
-
-  if (errors.length) {
-    return errorFmt({
-      type: 'configuration',
-      errors,
-      inventory,
-    })
-  }
-
-  /**
-   * Deal with project validation errors
-   */
+  let validations = layerValidations.map(params => {
+    return function (callback) {
+      if (validateLayers) layers(params, callback)
+      else callback()
+    }
+  })
 
   // Ensure @tables children (@streams, @indexes) have parent tables present
-  tablesChildren(inventory, errors)
+  validations.push(function (callback) {
+    tablesChildren(inventory, callback)
+  })
 
-  if (errors.length) {
-    return errorFmt({
-      type: 'validation',
-      errors,
-      inventory,
-    })
-  }
+  series(validations, callback)
 }
 
 
@@ -5099,7 +8187,6 @@ module.exports = function finalValidation (params, inventory) {
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
 let fnConfig = __webpack_require__(80)
-let pragmas = __webpack_require__(876)
 
 /**
  * Returns a default stub inventory object
@@ -5115,7 +8202,6 @@ module.exports = function inventoryDefaults (params = {}) {
     _arc: {
       version: 'Unknown',     // @architect/architect semver (if installed)
       defaultFunctionConfig,  // Architect's default function config
-      pragmas,                // Registry of all + Lambda pragmas
     },
     _project: {
       type: 'aws',
@@ -5144,7 +8230,7 @@ module.exports = function inventoryDefaults (params = {}) {
       memory: null,
       policies: null,
       profile: null,
-      region, // AWS always requires a region, so we provide a default
+      region,                 // AWS always requires a region, so we provide a default
       runtime: null,
       timeout: null,
     },
@@ -5154,7 +8240,7 @@ module.exports = function inventoryDefaults (params = {}) {
     http: null,
     indexes: null,
     macros: null,
-    plugins: null, // These are the Lambdas created by plugins, not the plugin modules, which are in _project.plugins
+    plugins: null, // these are the lambdas created by plugins, not the plugin modules; modules are up under _project
     proxy: null,
     queues: null,
     scheduled: null,
@@ -5164,7 +8250,7 @@ module.exports = function inventoryDefaults (params = {}) {
     tables: null,
     views: null,
     ws: null,
-    // Collection of all Lambda paths
+    // Collection of all Function paths
     lambdaSrcDirs: null,
     // Lambda lookup by source directory
     lambdasBySrcDir: null,
@@ -5174,102 +8260,17 @@ module.exports = function inventoryDefaults (params = {}) {
 
 /***/ }),
 
-/***/ 338:
+/***/ 346:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
-let is = __webpack_require__(300)
-let { regex, size, unique } = __webpack_require__(739)
+let populate = __webpack_require__(631)
 
-/**
- * Validate @scheduled
- *
- * Where possible, attempts to follow EventBridge validation:
- * See: https://docs.aws.amazon.com/eventbridge/latest/APIReference/API_Rule.html
- * See: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-events-rule.html
- * See: https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-create-rule-schedule.html
- */
-module.exports = function validateScheduled (scheduled, errors) {
-  if (scheduled.length) {
-    unique(scheduled, '@scheduled', errors)
+module.exports = function configureScheduled ({ arc, inventory }) {
+  if (!arc.scheduled || !arc.scheduled.length) return null
 
-    scheduled.forEach(schedule => {
-      let { name, rate, cron } = schedule
-      regex(name, 'veryLooseName', '@scheduled', errors)
+  let scheduled = populate.scheduled(arc.scheduled, inventory)
 
-      // Assume 14 chars are taken up by resource naming in arc/package
-      size(name, 1, 242, '@scheduled', errors)
-
-      if (cron) validateCron(schedule, errors)
-      if (rate) validateRate(schedule, errors)
-
-      if (!cron && !rate) errors.push(`Invalid @scheduled item (no cron or rate expression found): ${name}`)
-      if (cron && rate) errors.push(`Invalid @scheduled item (use either cron or rate, not both): ${name}`)
-    })
-  }
-}
-
-function validateCron (schedule, errors) {
-  let { name, cron } = schedule
-  let { expression, minutes, hours, dayOfMonth, month, dayOfWeek, year } = cron
-
-  if (expression.split(' ').length !== 6) {
-    return errors.push(`Invalid @scheduled item (cron expressions have six fields): ${name} cron(${expression})`)
-  }
-  function expErr (description, value) {
-    errors.push(`Invalid @scheduled item (${description} value: ${value}): ${name} cron(${expression})`)
-  }
-
-  // TODO This validation is not great, but it accomplishes more than the aws-cron-parser module; please improve!
-  let minHrYr = /^[\d,\-\*\/]+$/
-  let dom =     /^[\d,\-\*\/\?LW]+$/
-  let mon =     /^[\da-zA-Z,\-\*\/\?LW]+$/
-  let dow =     /^[\da-zA-Z,\-\*\?L#]+$/
-  if (!minutes.toString().match(minHrYr)) expErr('minutes', minutes)
-  if (!hours.toString().match(minHrYr))   expErr('hours', hours)
-  if (!dayOfMonth.toString().match(dom))  expErr('day-of-month', dayOfMonth)
-  if (!month.toString().match(mon))       expErr('month', month)
-  if (!dayOfWeek.toString().match(dow))   expErr('day-of-week', dayOfWeek)
-  if (!year.toString().match(minHrYr))    expErr('year', year)
-}
-
-
-let singular = [ 'minute', 'hour', 'day' ]
-let plural = [ 'minutes', 'hours', 'days' ]
-function validateRate (schedule, errors) {
-  let { name, rate } = schedule
-  let { expression, value, interval } = rate
-
-  if (expression.split(' ').length !== 2) {
-    return errors.push(`Invalid @scheduled item (rate expressions have two fields): ${name} rate(${expression})`)
-  }
-  function expErr (description, value) {
-    errors.push(`Invalid @scheduled item (${description}, value: ${value}): ${name} rate(${expression})`)
-  }
-
-  // Value must be a >0 number
-  if (!is.number(value) || !(value > 0)) {
-    expErr('rate value must be a number greater than 0', value)
-  }
-  // Value must be a whole number
-  else if (!value.toString().match(/^\d+$/)) {
-    expErr('rate value must be a whole number', value)
-  }
-  // Interval must be a string
-  if (!is.string(interval)) {
-    return expErr(`rate interval must be 'minute', 'minutes', 'hour', 'hours', 'day', or 'days'`, interval)
-  }
-  // Interval must be use the singular/plural values above
-  if (!singular.concat(plural).some(i => i === interval)) {
-    expErr(`rate interval must be 'minute', 'minutes', 'hour', 'hours', 'day', or 'days'`, interval)
-  }
-  // Value of 1 must use singular interval
-  if (value === 1 && plural.some(i => i === interval)) {
-    expErr(`rate value of 1 must use a singular interval, e.g. 'minute', 'hour', 'day'`, interval)
-  }
-  // Value >1 must use plural interval
-  if (value > 1 && singular.some(i => i === interval)) {
-    expErr(`rate values greater than 1 must use plural intervals, e.g. 'minutes', 'hours', 'days'`, interval)
-  }
+  return scheduled
 }
 
 
@@ -5290,6 +8291,46 @@ module.exports = require("assert");
 
 /***/ }),
 
+/***/ 359:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let { validate, patterns } =  __webpack_require__(689)
+
+module.exports = function configureApp ({ arc }) {
+  if (!Array.isArray(arc.app) ||
+      arc.app.length !== 1 ||
+      typeof arc.app[0] !== 'string') {
+    throw Error('@app name not found')
+  }
+
+  let appName = arc.app[0]
+
+  // Validation
+  validate.regex(appName, patterns.looseName, '@app')
+  validate.size(appName, 100, '@app')
+
+  return appName
+}
+
+
+/***/ }),
+
+/***/ 364:
+/***/ (function(module) {
+
+"use strict";
+
+
+module.exports = (flag, argv = process.argv) => {
+	const prefix = flag.startsWith('-') ? '' : (flag.length === 1 ? '-' : '--');
+	const position = argv.indexOf(prefix + flag);
+	const terminatorPosition = argv.indexOf('--');
+	return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
+};
+
+
+/***/ }),
+
 /***/ 373:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
@@ -5306,34 +8347,841 @@ module.exports = {
 
 /***/ }),
 
-/***/ 377:
-/***/ (function(module, __unusedexports, __webpack_require__) {
-
-let { basename } = __webpack_require__(622)
+/***/ 376:
+/***/ (function(module) {
 
 /**
- * Common error formatter
- *
- * @param params {object}
- * @param params.type {string} - Inventory error type: `manifest`, `validation`, or `configuration`
- * @param params.errors {array} - Array of one or more errors to output
- * @param params.meta {string} - Appends optional info to primary error message
- * @param params.inventory {object} - Inventory object
- *
- * @returns Formatted Error + appended ARC_ERRORS property
+ * Use Unix seperators on Windows
+ * We do this because `path.posix.normalize(process.cwd())` returns `C:\\foo\\bar`, when we want `C:/foo/bar`
+ * Normalise to slash file names (`C:/foo/bar`) for regex tests, etc.
  */
-module.exports = function format (params) {
-  let { type, errors, meta, inventory } = params
-  if (!meta && type === 'validation') {
-    meta = inventory._project.manifest
-      ? ` in ${basename(inventory._project.manifest)}`
-      : ''
+module.exports = function pathToUnix (string) {
+  return string.replace(/\\/g, '/')
+}
+
+
+/***/ }),
+
+/***/ 402:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+// Approach:
+//
+// 1. Get the minimatch set
+// 2. For each pattern in the set, PROCESS(pattern, false)
+// 3. Store matches per-set, then uniq them
+//
+// PROCESS(pattern, inGlobStar)
+// Get the first [n] items from pattern that are all strings
+// Join these together.  This is PREFIX.
+//   If there is no more remaining, then stat(PREFIX) and
+//   add to matches if it succeeds.  END.
+//
+// If inGlobStar and PREFIX is symlink and points to dir
+//   set ENTRIES = []
+// else readdir(PREFIX) as ENTRIES
+//   If fail, END
+//
+// with ENTRIES
+//   If pattern[n] is GLOBSTAR
+//     // handle the case where the globstar match is empty
+//     // by pruning it out, and testing the resulting pattern
+//     PROCESS(pattern[0..n] + pattern[n+1 .. $], false)
+//     // handle other cases.
+//     for ENTRY in ENTRIES (not dotfiles)
+//       // attach globstar + tail onto the entry
+//       // Mark that this entry is a globstar match
+//       PROCESS(pattern[0..n] + ENTRY + pattern[n .. $], true)
+//
+//   else // not globstar
+//     for ENTRY in ENTRIES (not dotfiles, unless pattern[n] is dot)
+//       Test ENTRY against pattern[n]
+//       If fails, continue
+//       If passes, PROCESS(pattern[0..n] + item + pattern[n+1 .. $])
+//
+// Caveat:
+//   Cache all stats and readdirs results to minimize syscall.  Since all
+//   we ever care about is existence and directory-ness, we can just keep
+//   `true` for files, and [children,...] for directories, or `false` for
+//   things that don't exist.
+
+module.exports = glob
+
+var fs = __webpack_require__(747)
+var rp = __webpack_require__(302)
+var minimatch = __webpack_require__(93)
+var Minimatch = minimatch.Minimatch
+var inherits = __webpack_require__(422)
+var EE = __webpack_require__(614).EventEmitter
+var path = __webpack_require__(622)
+var assert = __webpack_require__(357)
+var isAbsolute = __webpack_require__(681)
+var globSync = __webpack_require__(245)
+var common = __webpack_require__(856)
+var setopts = common.setopts
+var ownProp = common.ownProp
+var inflight = __webpack_require__(674)
+var util = __webpack_require__(669)
+var childrenIgnored = common.childrenIgnored
+var isIgnored = common.isIgnored
+
+var once = __webpack_require__(49)
+
+function glob (pattern, options, cb) {
+  if (typeof options === 'function') cb = options, options = {}
+  if (!options) options = {}
+
+  if (options.sync) {
+    if (cb)
+      throw new TypeError('callback provided to sync glob')
+    return globSync(pattern, options)
   }
-  let output = errors.map(err => `- ${err}`).join('\n')
-  let errType = type[0].toUpperCase() + type.substr(1)
-  let err = Error(`${errType} error${errors.length > 1 ? 's' : ''}${meta ? meta : ''}:\n${output}`)
-  err.ARC_ERRORS = { type, errors }
-  return err
+
+  return new Glob(pattern, options, cb)
+}
+
+glob.sync = globSync
+var GlobSync = glob.GlobSync = globSync.GlobSync
+
+// old api surface
+glob.glob = glob
+
+function extend (origin, add) {
+  if (add === null || typeof add !== 'object') {
+    return origin
+  }
+
+  var keys = Object.keys(add)
+  var i = keys.length
+  while (i--) {
+    origin[keys[i]] = add[keys[i]]
+  }
+  return origin
+}
+
+glob.hasMagic = function (pattern, options_) {
+  var options = extend({}, options_)
+  options.noprocess = true
+
+  var g = new Glob(pattern, options)
+  var set = g.minimatch.set
+
+  if (!pattern)
+    return false
+
+  if (set.length > 1)
+    return true
+
+  for (var j = 0; j < set[0].length; j++) {
+    if (typeof set[0][j] !== 'string')
+      return true
+  }
+
+  return false
+}
+
+glob.Glob = Glob
+inherits(Glob, EE)
+function Glob (pattern, options, cb) {
+  if (typeof options === 'function') {
+    cb = options
+    options = null
+  }
+
+  if (options && options.sync) {
+    if (cb)
+      throw new TypeError('callback provided to sync glob')
+    return new GlobSync(pattern, options)
+  }
+
+  if (!(this instanceof Glob))
+    return new Glob(pattern, options, cb)
+
+  setopts(this, pattern, options)
+  this._didRealPath = false
+
+  // process each pattern in the minimatch set
+  var n = this.minimatch.set.length
+
+  // The matches are stored as {<filename>: true,...} so that
+  // duplicates are automagically pruned.
+  // Later, we do an Object.keys() on these.
+  // Keep them as a list so we can fill in when nonull is set.
+  this.matches = new Array(n)
+
+  if (typeof cb === 'function') {
+    cb = once(cb)
+    this.on('error', cb)
+    this.on('end', function (matches) {
+      cb(null, matches)
+    })
+  }
+
+  var self = this
+  this._processing = 0
+
+  this._emitQueue = []
+  this._processQueue = []
+  this.paused = false
+
+  if (this.noprocess)
+    return this
+
+  if (n === 0)
+    return done()
+
+  var sync = true
+  for (var i = 0; i < n; i ++) {
+    this._process(this.minimatch.set[i], i, false, done)
+  }
+  sync = false
+
+  function done () {
+    --self._processing
+    if (self._processing <= 0) {
+      if (sync) {
+        process.nextTick(function () {
+          self._finish()
+        })
+      } else {
+        self._finish()
+      }
+    }
+  }
+}
+
+Glob.prototype._finish = function () {
+  assert(this instanceof Glob)
+  if (this.aborted)
+    return
+
+  if (this.realpath && !this._didRealpath)
+    return this._realpath()
+
+  common.finish(this)
+  this.emit('end', this.found)
+}
+
+Glob.prototype._realpath = function () {
+  if (this._didRealpath)
+    return
+
+  this._didRealpath = true
+
+  var n = this.matches.length
+  if (n === 0)
+    return this._finish()
+
+  var self = this
+  for (var i = 0; i < this.matches.length; i++)
+    this._realpathSet(i, next)
+
+  function next () {
+    if (--n === 0)
+      self._finish()
+  }
+}
+
+Glob.prototype._realpathSet = function (index, cb) {
+  var matchset = this.matches[index]
+  if (!matchset)
+    return cb()
+
+  var found = Object.keys(matchset)
+  var self = this
+  var n = found.length
+
+  if (n === 0)
+    return cb()
+
+  var set = this.matches[index] = Object.create(null)
+  found.forEach(function (p, i) {
+    // If there's a problem with the stat, then it means that
+    // one or more of the links in the realpath couldn't be
+    // resolved.  just return the abs value in that case.
+    p = self._makeAbs(p)
+    rp.realpath(p, self.realpathCache, function (er, real) {
+      if (!er)
+        set[real] = true
+      else if (er.syscall === 'stat')
+        set[p] = true
+      else
+        self.emit('error', er) // srsly wtf right here
+
+      if (--n === 0) {
+        self.matches[index] = set
+        cb()
+      }
+    })
+  })
+}
+
+Glob.prototype._mark = function (p) {
+  return common.mark(this, p)
+}
+
+Glob.prototype._makeAbs = function (f) {
+  return common.makeAbs(this, f)
+}
+
+Glob.prototype.abort = function () {
+  this.aborted = true
+  this.emit('abort')
+}
+
+Glob.prototype.pause = function () {
+  if (!this.paused) {
+    this.paused = true
+    this.emit('pause')
+  }
+}
+
+Glob.prototype.resume = function () {
+  if (this.paused) {
+    this.emit('resume')
+    this.paused = false
+    if (this._emitQueue.length) {
+      var eq = this._emitQueue.slice(0)
+      this._emitQueue.length = 0
+      for (var i = 0; i < eq.length; i ++) {
+        var e = eq[i]
+        this._emitMatch(e[0], e[1])
+      }
+    }
+    if (this._processQueue.length) {
+      var pq = this._processQueue.slice(0)
+      this._processQueue.length = 0
+      for (var i = 0; i < pq.length; i ++) {
+        var p = pq[i]
+        this._processing--
+        this._process(p[0], p[1], p[2], p[3])
+      }
+    }
+  }
+}
+
+Glob.prototype._process = function (pattern, index, inGlobStar, cb) {
+  assert(this instanceof Glob)
+  assert(typeof cb === 'function')
+
+  if (this.aborted)
+    return
+
+  this._processing++
+  if (this.paused) {
+    this._processQueue.push([pattern, index, inGlobStar, cb])
+    return
+  }
+
+  //console.error('PROCESS %d', this._processing, pattern)
+
+  // Get the first [n] parts of pattern that are all strings.
+  var n = 0
+  while (typeof pattern[n] === 'string') {
+    n ++
+  }
+  // now n is the index of the first one that is *not* a string.
+
+  // see if there's anything else
+  var prefix
+  switch (n) {
+    // if not, then this is rather simple
+    case pattern.length:
+      this._processSimple(pattern.join('/'), index, cb)
+      return
+
+    case 0:
+      // pattern *starts* with some non-trivial item.
+      // going to readdir(cwd), but not include the prefix in matches.
+      prefix = null
+      break
+
+    default:
+      // pattern has some string bits in the front.
+      // whatever it starts with, whether that's 'absolute' like /foo/bar,
+      // or 'relative' like '../baz'
+      prefix = pattern.slice(0, n).join('/')
+      break
+  }
+
+  var remain = pattern.slice(n)
+
+  // get the list of entries.
+  var read
+  if (prefix === null)
+    read = '.'
+  else if (isAbsolute(prefix) || isAbsolute(pattern.join('/'))) {
+    if (!prefix || !isAbsolute(prefix))
+      prefix = '/' + prefix
+    read = prefix
+  } else
+    read = prefix
+
+  var abs = this._makeAbs(read)
+
+  //if ignored, skip _processing
+  if (childrenIgnored(this, read))
+    return cb()
+
+  var isGlobStar = remain[0] === minimatch.GLOBSTAR
+  if (isGlobStar)
+    this._processGlobStar(prefix, read, abs, remain, index, inGlobStar, cb)
+  else
+    this._processReaddir(prefix, read, abs, remain, index, inGlobStar, cb)
+}
+
+Glob.prototype._processReaddir = function (prefix, read, abs, remain, index, inGlobStar, cb) {
+  var self = this
+  this._readdir(abs, inGlobStar, function (er, entries) {
+    return self._processReaddir2(prefix, read, abs, remain, index, inGlobStar, entries, cb)
+  })
+}
+
+Glob.prototype._processReaddir2 = function (prefix, read, abs, remain, index, inGlobStar, entries, cb) {
+
+  // if the abs isn't a dir, then nothing can match!
+  if (!entries)
+    return cb()
+
+  // It will only match dot entries if it starts with a dot, or if
+  // dot is set.  Stuff like @(.foo|.bar) isn't allowed.
+  var pn = remain[0]
+  var negate = !!this.minimatch.negate
+  var rawGlob = pn._glob
+  var dotOk = this.dot || rawGlob.charAt(0) === '.'
+
+  var matchedEntries = []
+  for (var i = 0; i < entries.length; i++) {
+    var e = entries[i]
+    if (e.charAt(0) !== '.' || dotOk) {
+      var m
+      if (negate && !prefix) {
+        m = !e.match(pn)
+      } else {
+        m = e.match(pn)
+      }
+      if (m)
+        matchedEntries.push(e)
+    }
+  }
+
+  //console.error('prd2', prefix, entries, remain[0]._glob, matchedEntries)
+
+  var len = matchedEntries.length
+  // If there are no matched entries, then nothing matches.
+  if (len === 0)
+    return cb()
+
+  // if this is the last remaining pattern bit, then no need for
+  // an additional stat *unless* the user has specified mark or
+  // stat explicitly.  We know they exist, since readdir returned
+  // them.
+
+  if (remain.length === 1 && !this.mark && !this.stat) {
+    if (!this.matches[index])
+      this.matches[index] = Object.create(null)
+
+    for (var i = 0; i < len; i ++) {
+      var e = matchedEntries[i]
+      if (prefix) {
+        if (prefix !== '/')
+          e = prefix + '/' + e
+        else
+          e = prefix + e
+      }
+
+      if (e.charAt(0) === '/' && !this.nomount) {
+        e = path.join(this.root, e)
+      }
+      this._emitMatch(index, e)
+    }
+    // This was the last one, and no stats were needed
+    return cb()
+  }
+
+  // now test all matched entries as stand-ins for that part
+  // of the pattern.
+  remain.shift()
+  for (var i = 0; i < len; i ++) {
+    var e = matchedEntries[i]
+    var newPattern
+    if (prefix) {
+      if (prefix !== '/')
+        e = prefix + '/' + e
+      else
+        e = prefix + e
+    }
+    this._process([e].concat(remain), index, inGlobStar, cb)
+  }
+  cb()
+}
+
+Glob.prototype._emitMatch = function (index, e) {
+  if (this.aborted)
+    return
+
+  if (isIgnored(this, e))
+    return
+
+  if (this.paused) {
+    this._emitQueue.push([index, e])
+    return
+  }
+
+  var abs = isAbsolute(e) ? e : this._makeAbs(e)
+
+  if (this.mark)
+    e = this._mark(e)
+
+  if (this.absolute)
+    e = abs
+
+  if (this.matches[index][e])
+    return
+
+  if (this.nodir) {
+    var c = this.cache[abs]
+    if (c === 'DIR' || Array.isArray(c))
+      return
+  }
+
+  this.matches[index][e] = true
+
+  var st = this.statCache[abs]
+  if (st)
+    this.emit('stat', e, st)
+
+  this.emit('match', e)
+}
+
+Glob.prototype._readdirInGlobStar = function (abs, cb) {
+  if (this.aborted)
+    return
+
+  // follow all symlinked directories forever
+  // just proceed as if this is a non-globstar situation
+  if (this.follow)
+    return this._readdir(abs, false, cb)
+
+  var lstatkey = 'lstat\0' + abs
+  var self = this
+  var lstatcb = inflight(lstatkey, lstatcb_)
+
+  if (lstatcb)
+    fs.lstat(abs, lstatcb)
+
+  function lstatcb_ (er, lstat) {
+    if (er && er.code === 'ENOENT')
+      return cb()
+
+    var isSym = lstat && lstat.isSymbolicLink()
+    self.symlinks[abs] = isSym
+
+    // If it's not a symlink or a dir, then it's definitely a regular file.
+    // don't bother doing a readdir in that case.
+    if (!isSym && lstat && !lstat.isDirectory()) {
+      self.cache[abs] = 'FILE'
+      cb()
+    } else
+      self._readdir(abs, false, cb)
+  }
+}
+
+Glob.prototype._readdir = function (abs, inGlobStar, cb) {
+  if (this.aborted)
+    return
+
+  cb = inflight('readdir\0'+abs+'\0'+inGlobStar, cb)
+  if (!cb)
+    return
+
+  //console.error('RD %j %j', +inGlobStar, abs)
+  if (inGlobStar && !ownProp(this.symlinks, abs))
+    return this._readdirInGlobStar(abs, cb)
+
+  if (ownProp(this.cache, abs)) {
+    var c = this.cache[abs]
+    if (!c || c === 'FILE')
+      return cb()
+
+    if (Array.isArray(c))
+      return cb(null, c)
+  }
+
+  var self = this
+  fs.readdir(abs, readdirCb(this, abs, cb))
+}
+
+function readdirCb (self, abs, cb) {
+  return function (er, entries) {
+    if (er)
+      self._readdirError(abs, er, cb)
+    else
+      self._readdirEntries(abs, entries, cb)
+  }
+}
+
+Glob.prototype._readdirEntries = function (abs, entries, cb) {
+  if (this.aborted)
+    return
+
+  // if we haven't asked to stat everything, then just
+  // assume that everything in there exists, so we can avoid
+  // having to stat it a second time.
+  if (!this.mark && !this.stat) {
+    for (var i = 0; i < entries.length; i ++) {
+      var e = entries[i]
+      if (abs === '/')
+        e = abs + e
+      else
+        e = abs + '/' + e
+      this.cache[e] = true
+    }
+  }
+
+  this.cache[abs] = entries
+  return cb(null, entries)
+}
+
+Glob.prototype._readdirError = function (f, er, cb) {
+  if (this.aborted)
+    return
+
+  // handle errors, and cache the information
+  switch (er.code) {
+    case 'ENOTSUP': // https://github.com/isaacs/node-glob/issues/205
+    case 'ENOTDIR': // totally normal. means it *does* exist.
+      var abs = this._makeAbs(f)
+      this.cache[abs] = 'FILE'
+      if (abs === this.cwdAbs) {
+        var error = new Error(er.code + ' invalid cwd ' + this.cwd)
+        error.path = this.cwd
+        error.code = er.code
+        this.emit('error', error)
+        this.abort()
+      }
+      break
+
+    case 'ENOENT': // not terribly unusual
+    case 'ELOOP':
+    case 'ENAMETOOLONG':
+    case 'UNKNOWN':
+      this.cache[this._makeAbs(f)] = false
+      break
+
+    default: // some unusual error.  Treat as failure.
+      this.cache[this._makeAbs(f)] = false
+      if (this.strict) {
+        this.emit('error', er)
+        // If the error is handled, then we abort
+        // if not, we threw out of here
+        this.abort()
+      }
+      if (!this.silent)
+        console.error('glob error', er)
+      break
+  }
+
+  return cb()
+}
+
+Glob.prototype._processGlobStar = function (prefix, read, abs, remain, index, inGlobStar, cb) {
+  var self = this
+  this._readdir(abs, inGlobStar, function (er, entries) {
+    self._processGlobStar2(prefix, read, abs, remain, index, inGlobStar, entries, cb)
+  })
+}
+
+
+Glob.prototype._processGlobStar2 = function (prefix, read, abs, remain, index, inGlobStar, entries, cb) {
+  //console.error('pgs2', prefix, remain[0], entries)
+
+  // no entries means not a dir, so it can never have matches
+  // foo.txt/** doesn't match foo.txt
+  if (!entries)
+    return cb()
+
+  // test without the globstar, and with every child both below
+  // and replacing the globstar.
+  var remainWithoutGlobStar = remain.slice(1)
+  var gspref = prefix ? [ prefix ] : []
+  var noGlobStar = gspref.concat(remainWithoutGlobStar)
+
+  // the noGlobStar pattern exits the inGlobStar state
+  this._process(noGlobStar, index, false, cb)
+
+  var isSym = this.symlinks[abs]
+  var len = entries.length
+
+  // If it's a symlink, and we're in a globstar, then stop
+  if (isSym && inGlobStar)
+    return cb()
+
+  for (var i = 0; i < len; i++) {
+    var e = entries[i]
+    if (e.charAt(0) === '.' && !this.dot)
+      continue
+
+    // these two cases enter the inGlobStar state
+    var instead = gspref.concat(entries[i], remainWithoutGlobStar)
+    this._process(instead, index, true, cb)
+
+    var below = gspref.concat(entries[i], remain)
+    this._process(below, index, true, cb)
+  }
+
+  cb()
+}
+
+Glob.prototype._processSimple = function (prefix, index, cb) {
+  // XXX review this.  Shouldn't it be doing the mounting etc
+  // before doing stat?  kinda weird?
+  var self = this
+  this._stat(prefix, function (er, exists) {
+    self._processSimple2(prefix, index, er, exists, cb)
+  })
+}
+Glob.prototype._processSimple2 = function (prefix, index, er, exists, cb) {
+
+  //console.error('ps2', prefix, exists)
+
+  if (!this.matches[index])
+    this.matches[index] = Object.create(null)
+
+  // If it doesn't exist, then just mark the lack of results
+  if (!exists)
+    return cb()
+
+  if (prefix && isAbsolute(prefix) && !this.nomount) {
+    var trail = /[\/\\]$/.test(prefix)
+    if (prefix.charAt(0) === '/') {
+      prefix = path.join(this.root, prefix)
+    } else {
+      prefix = path.resolve(this.root, prefix)
+      if (trail)
+        prefix += '/'
+    }
+  }
+
+  if (process.platform === 'win32')
+    prefix = prefix.replace(/\\/g, '/')
+
+  // Mark this as a match
+  this._emitMatch(index, prefix)
+  cb()
+}
+
+// Returns either 'DIR', 'FILE', or false
+Glob.prototype._stat = function (f, cb) {
+  var abs = this._makeAbs(f)
+  var needDir = f.slice(-1) === '/'
+
+  if (f.length > this.maxLength)
+    return cb()
+
+  if (!this.stat && ownProp(this.cache, abs)) {
+    var c = this.cache[abs]
+
+    if (Array.isArray(c))
+      c = 'DIR'
+
+    // It exists, but maybe not how we need it
+    if (!needDir || c === 'DIR')
+      return cb(null, c)
+
+    if (needDir && c === 'FILE')
+      return cb()
+
+    // otherwise we have to stat, because maybe c=true
+    // if we know it exists, but not what it is.
+  }
+
+  var exists
+  var stat = this.statCache[abs]
+  if (stat !== undefined) {
+    if (stat === false)
+      return cb(null, stat)
+    else {
+      var type = stat.isDirectory() ? 'DIR' : 'FILE'
+      if (needDir && type === 'FILE')
+        return cb()
+      else
+        return cb(null, type, stat)
+    }
+  }
+
+  var self = this
+  var statcb = inflight('stat\0' + abs, lstatcb_)
+  if (statcb)
+    fs.lstat(abs, statcb)
+
+  function lstatcb_ (er, lstat) {
+    if (lstat && lstat.isSymbolicLink()) {
+      // If it's a symlink, then treat it as the target, unless
+      // the target does not exist, then treat it as a file.
+      return fs.stat(abs, function (er, stat) {
+        if (er)
+          self._stat2(f, abs, null, lstat, cb)
+        else
+          self._stat2(f, abs, er, stat, cb)
+      })
+    } else {
+      self._stat2(f, abs, er, lstat, cb)
+    }
+  }
+}
+
+Glob.prototype._stat2 = function (f, abs, er, stat, cb) {
+  if (er && (er.code === 'ENOENT' || er.code === 'ENOTDIR')) {
+    this.statCache[abs] = false
+    return cb()
+  }
+
+  var needDir = f.slice(-1) === '/'
+  this.statCache[abs] = stat
+
+  if (abs.slice(-1) === '/' && stat && !stat.isDirectory())
+    return cb(null, false, stat)
+
+  var c = true
+  if (stat)
+    c = stat.isDirectory() ? 'DIR' : 'FILE'
+  this.cache[abs] = this.cache[abs] || c
+
+  if (needDir && c === 'FILE')
+    return cb()
+
+  return cb(null, c, stat)
+}
+
+
+/***/ }),
+
+/***/ 413:
+/***/ (function(module) {
+
+module.exports = require("stream");
+
+/***/ }),
+
+/***/ 417:
+/***/ (function(module) {
+
+module.exports = require("crypto");
+
+/***/ }),
+
+/***/ 422:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+try {
+  var util = __webpack_require__(669);
+  /* istanbul ignore next */
+  if (typeof util.inherits !== 'function') throw '';
+  module.exports = util.inherits;
+} catch (e) {
+  /* istanbul ignore next */
+  module.exports = __webpack_require__(315);
 }
 
 
@@ -5438,17 +9286,1060 @@ function escapeProperty(s) {
 
 /***/ }),
 
+/***/ 438:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let chalk = __webpack_require__(843)
+let notWin = !process.platform.startsWith('win')
+
+/**
+ * Windows cmd.exe supports a partial UCS-2 charset
+ */
+let buzz = notWin
+  ? chalk.grey('⌁')
+  : chalk.grey('~')
+
+let start = notWin
+  ? chalk.green.dim('⚬')
+  : chalk.green.dim('○')
+
+let done = notWin
+  ? chalk.green.dim('✓')
+  : chalk.green.dim('√')
+
+let warn = notWin
+  ? chalk.yellow('⚠️')
+  : chalk.yellow('!')
+
+let err = notWin
+  ? chalk.red('×')
+  : chalk.red('x')
+
+module.exports = {
+  buzz,
+  start,
+  done,
+  warn,
+  err
+}
+
+
+/***/ }),
+
+/***/ 445:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+/* MIT license */
+/* eslint-disable no-mixed-operators */
+const cssKeywords = __webpack_require__(885);
+
+// NOTE: conversions should only return primitive values (i.e. arrays, or
+//       values that give correct `typeof` results).
+//       do not use box values types (i.e. Number(), String(), etc.)
+
+const reverseKeywords = {};
+for (const key of Object.keys(cssKeywords)) {
+	reverseKeywords[cssKeywords[key]] = key;
+}
+
+const convert = {
+	rgb: {channels: 3, labels: 'rgb'},
+	hsl: {channels: 3, labels: 'hsl'},
+	hsv: {channels: 3, labels: 'hsv'},
+	hwb: {channels: 3, labels: 'hwb'},
+	cmyk: {channels: 4, labels: 'cmyk'},
+	xyz: {channels: 3, labels: 'xyz'},
+	lab: {channels: 3, labels: 'lab'},
+	lch: {channels: 3, labels: 'lch'},
+	hex: {channels: 1, labels: ['hex']},
+	keyword: {channels: 1, labels: ['keyword']},
+	ansi16: {channels: 1, labels: ['ansi16']},
+	ansi256: {channels: 1, labels: ['ansi256']},
+	hcg: {channels: 3, labels: ['h', 'c', 'g']},
+	apple: {channels: 3, labels: ['r16', 'g16', 'b16']},
+	gray: {channels: 1, labels: ['gray']}
+};
+
+module.exports = convert;
+
+// Hide .channels and .labels properties
+for (const model of Object.keys(convert)) {
+	if (!('channels' in convert[model])) {
+		throw new Error('missing channels property: ' + model);
+	}
+
+	if (!('labels' in convert[model])) {
+		throw new Error('missing channel labels property: ' + model);
+	}
+
+	if (convert[model].labels.length !== convert[model].channels) {
+		throw new Error('channel and label counts mismatch: ' + model);
+	}
+
+	const {channels, labels} = convert[model];
+	delete convert[model].channels;
+	delete convert[model].labels;
+	Object.defineProperty(convert[model], 'channels', {value: channels});
+	Object.defineProperty(convert[model], 'labels', {value: labels});
+}
+
+convert.rgb.hsl = function (rgb) {
+	const r = rgb[0] / 255;
+	const g = rgb[1] / 255;
+	const b = rgb[2] / 255;
+	const min = Math.min(r, g, b);
+	const max = Math.max(r, g, b);
+	const delta = max - min;
+	let h;
+	let s;
+
+	if (max === min) {
+		h = 0;
+	} else if (r === max) {
+		h = (g - b) / delta;
+	} else if (g === max) {
+		h = 2 + (b - r) / delta;
+	} else if (b === max) {
+		h = 4 + (r - g) / delta;
+	}
+
+	h = Math.min(h * 60, 360);
+
+	if (h < 0) {
+		h += 360;
+	}
+
+	const l = (min + max) / 2;
+
+	if (max === min) {
+		s = 0;
+	} else if (l <= 0.5) {
+		s = delta / (max + min);
+	} else {
+		s = delta / (2 - max - min);
+	}
+
+	return [h, s * 100, l * 100];
+};
+
+convert.rgb.hsv = function (rgb) {
+	let rdif;
+	let gdif;
+	let bdif;
+	let h;
+	let s;
+
+	const r = rgb[0] / 255;
+	const g = rgb[1] / 255;
+	const b = rgb[2] / 255;
+	const v = Math.max(r, g, b);
+	const diff = v - Math.min(r, g, b);
+	const diffc = function (c) {
+		return (v - c) / 6 / diff + 1 / 2;
+	};
+
+	if (diff === 0) {
+		h = 0;
+		s = 0;
+	} else {
+		s = diff / v;
+		rdif = diffc(r);
+		gdif = diffc(g);
+		bdif = diffc(b);
+
+		if (r === v) {
+			h = bdif - gdif;
+		} else if (g === v) {
+			h = (1 / 3) + rdif - bdif;
+		} else if (b === v) {
+			h = (2 / 3) + gdif - rdif;
+		}
+
+		if (h < 0) {
+			h += 1;
+		} else if (h > 1) {
+			h -= 1;
+		}
+	}
+
+	return [
+		h * 360,
+		s * 100,
+		v * 100
+	];
+};
+
+convert.rgb.hwb = function (rgb) {
+	const r = rgb[0];
+	const g = rgb[1];
+	let b = rgb[2];
+	const h = convert.rgb.hsl(rgb)[0];
+	const w = 1 / 255 * Math.min(r, Math.min(g, b));
+
+	b = 1 - 1 / 255 * Math.max(r, Math.max(g, b));
+
+	return [h, w * 100, b * 100];
+};
+
+convert.rgb.cmyk = function (rgb) {
+	const r = rgb[0] / 255;
+	const g = rgb[1] / 255;
+	const b = rgb[2] / 255;
+
+	const k = Math.min(1 - r, 1 - g, 1 - b);
+	const c = (1 - r - k) / (1 - k) || 0;
+	const m = (1 - g - k) / (1 - k) || 0;
+	const y = (1 - b - k) / (1 - k) || 0;
+
+	return [c * 100, m * 100, y * 100, k * 100];
+};
+
+function comparativeDistance(x, y) {
+	/*
+		See https://en.m.wikipedia.org/wiki/Euclidean_distance#Squared_Euclidean_distance
+	*/
+	return (
+		((x[0] - y[0]) ** 2) +
+		((x[1] - y[1]) ** 2) +
+		((x[2] - y[2]) ** 2)
+	);
+}
+
+convert.rgb.keyword = function (rgb) {
+	const reversed = reverseKeywords[rgb];
+	if (reversed) {
+		return reversed;
+	}
+
+	let currentClosestDistance = Infinity;
+	let currentClosestKeyword;
+
+	for (const keyword of Object.keys(cssKeywords)) {
+		const value = cssKeywords[keyword];
+
+		// Compute comparative distance
+		const distance = comparativeDistance(rgb, value);
+
+		// Check if its less, if so set as closest
+		if (distance < currentClosestDistance) {
+			currentClosestDistance = distance;
+			currentClosestKeyword = keyword;
+		}
+	}
+
+	return currentClosestKeyword;
+};
+
+convert.keyword.rgb = function (keyword) {
+	return cssKeywords[keyword];
+};
+
+convert.rgb.xyz = function (rgb) {
+	let r = rgb[0] / 255;
+	let g = rgb[1] / 255;
+	let b = rgb[2] / 255;
+
+	// Assume sRGB
+	r = r > 0.04045 ? (((r + 0.055) / 1.055) ** 2.4) : (r / 12.92);
+	g = g > 0.04045 ? (((g + 0.055) / 1.055) ** 2.4) : (g / 12.92);
+	b = b > 0.04045 ? (((b + 0.055) / 1.055) ** 2.4) : (b / 12.92);
+
+	const x = (r * 0.4124) + (g * 0.3576) + (b * 0.1805);
+	const y = (r * 0.2126) + (g * 0.7152) + (b * 0.0722);
+	const z = (r * 0.0193) + (g * 0.1192) + (b * 0.9505);
+
+	return [x * 100, y * 100, z * 100];
+};
+
+convert.rgb.lab = function (rgb) {
+	const xyz = convert.rgb.xyz(rgb);
+	let x = xyz[0];
+	let y = xyz[1];
+	let z = xyz[2];
+
+	x /= 95.047;
+	y /= 100;
+	z /= 108.883;
+
+	x = x > 0.008856 ? (x ** (1 / 3)) : (7.787 * x) + (16 / 116);
+	y = y > 0.008856 ? (y ** (1 / 3)) : (7.787 * y) + (16 / 116);
+	z = z > 0.008856 ? (z ** (1 / 3)) : (7.787 * z) + (16 / 116);
+
+	const l = (116 * y) - 16;
+	const a = 500 * (x - y);
+	const b = 200 * (y - z);
+
+	return [l, a, b];
+};
+
+convert.hsl.rgb = function (hsl) {
+	const h = hsl[0] / 360;
+	const s = hsl[1] / 100;
+	const l = hsl[2] / 100;
+	let t2;
+	let t3;
+	let val;
+
+	if (s === 0) {
+		val = l * 255;
+		return [val, val, val];
+	}
+
+	if (l < 0.5) {
+		t2 = l * (1 + s);
+	} else {
+		t2 = l + s - l * s;
+	}
+
+	const t1 = 2 * l - t2;
+
+	const rgb = [0, 0, 0];
+	for (let i = 0; i < 3; i++) {
+		t3 = h + 1 / 3 * -(i - 1);
+		if (t3 < 0) {
+			t3++;
+		}
+
+		if (t3 > 1) {
+			t3--;
+		}
+
+		if (6 * t3 < 1) {
+			val = t1 + (t2 - t1) * 6 * t3;
+		} else if (2 * t3 < 1) {
+			val = t2;
+		} else if (3 * t3 < 2) {
+			val = t1 + (t2 - t1) * (2 / 3 - t3) * 6;
+		} else {
+			val = t1;
+		}
+
+		rgb[i] = val * 255;
+	}
+
+	return rgb;
+};
+
+convert.hsl.hsv = function (hsl) {
+	const h = hsl[0];
+	let s = hsl[1] / 100;
+	let l = hsl[2] / 100;
+	let smin = s;
+	const lmin = Math.max(l, 0.01);
+
+	l *= 2;
+	s *= (l <= 1) ? l : 2 - l;
+	smin *= lmin <= 1 ? lmin : 2 - lmin;
+	const v = (l + s) / 2;
+	const sv = l === 0 ? (2 * smin) / (lmin + smin) : (2 * s) / (l + s);
+
+	return [h, sv * 100, v * 100];
+};
+
+convert.hsv.rgb = function (hsv) {
+	const h = hsv[0] / 60;
+	const s = hsv[1] / 100;
+	let v = hsv[2] / 100;
+	const hi = Math.floor(h) % 6;
+
+	const f = h - Math.floor(h);
+	const p = 255 * v * (1 - s);
+	const q = 255 * v * (1 - (s * f));
+	const t = 255 * v * (1 - (s * (1 - f)));
+	v *= 255;
+
+	switch (hi) {
+		case 0:
+			return [v, t, p];
+		case 1:
+			return [q, v, p];
+		case 2:
+			return [p, v, t];
+		case 3:
+			return [p, q, v];
+		case 4:
+			return [t, p, v];
+		case 5:
+			return [v, p, q];
+	}
+};
+
+convert.hsv.hsl = function (hsv) {
+	const h = hsv[0];
+	const s = hsv[1] / 100;
+	const v = hsv[2] / 100;
+	const vmin = Math.max(v, 0.01);
+	let sl;
+	let l;
+
+	l = (2 - s) * v;
+	const lmin = (2 - s) * vmin;
+	sl = s * vmin;
+	sl /= (lmin <= 1) ? lmin : 2 - lmin;
+	sl = sl || 0;
+	l /= 2;
+
+	return [h, sl * 100, l * 100];
+};
+
+// http://dev.w3.org/csswg/css-color/#hwb-to-rgb
+convert.hwb.rgb = function (hwb) {
+	const h = hwb[0] / 360;
+	let wh = hwb[1] / 100;
+	let bl = hwb[2] / 100;
+	const ratio = wh + bl;
+	let f;
+
+	// Wh + bl cant be > 1
+	if (ratio > 1) {
+		wh /= ratio;
+		bl /= ratio;
+	}
+
+	const i = Math.floor(6 * h);
+	const v = 1 - bl;
+	f = 6 * h - i;
+
+	if ((i & 0x01) !== 0) {
+		f = 1 - f;
+	}
+
+	const n = wh + f * (v - wh); // Linear interpolation
+
+	let r;
+	let g;
+	let b;
+	/* eslint-disable max-statements-per-line,no-multi-spaces */
+	switch (i) {
+		default:
+		case 6:
+		case 0: r = v;  g = n;  b = wh; break;
+		case 1: r = n;  g = v;  b = wh; break;
+		case 2: r = wh; g = v;  b = n; break;
+		case 3: r = wh; g = n;  b = v; break;
+		case 4: r = n;  g = wh; b = v; break;
+		case 5: r = v;  g = wh; b = n; break;
+	}
+	/* eslint-enable max-statements-per-line,no-multi-spaces */
+
+	return [r * 255, g * 255, b * 255];
+};
+
+convert.cmyk.rgb = function (cmyk) {
+	const c = cmyk[0] / 100;
+	const m = cmyk[1] / 100;
+	const y = cmyk[2] / 100;
+	const k = cmyk[3] / 100;
+
+	const r = 1 - Math.min(1, c * (1 - k) + k);
+	const g = 1 - Math.min(1, m * (1 - k) + k);
+	const b = 1 - Math.min(1, y * (1 - k) + k);
+
+	return [r * 255, g * 255, b * 255];
+};
+
+convert.xyz.rgb = function (xyz) {
+	const x = xyz[0] / 100;
+	const y = xyz[1] / 100;
+	const z = xyz[2] / 100;
+	let r;
+	let g;
+	let b;
+
+	r = (x * 3.2406) + (y * -1.5372) + (z * -0.4986);
+	g = (x * -0.9689) + (y * 1.8758) + (z * 0.0415);
+	b = (x * 0.0557) + (y * -0.2040) + (z * 1.0570);
+
+	// Assume sRGB
+	r = r > 0.0031308
+		? ((1.055 * (r ** (1.0 / 2.4))) - 0.055)
+		: r * 12.92;
+
+	g = g > 0.0031308
+		? ((1.055 * (g ** (1.0 / 2.4))) - 0.055)
+		: g * 12.92;
+
+	b = b > 0.0031308
+		? ((1.055 * (b ** (1.0 / 2.4))) - 0.055)
+		: b * 12.92;
+
+	r = Math.min(Math.max(0, r), 1);
+	g = Math.min(Math.max(0, g), 1);
+	b = Math.min(Math.max(0, b), 1);
+
+	return [r * 255, g * 255, b * 255];
+};
+
+convert.xyz.lab = function (xyz) {
+	let x = xyz[0];
+	let y = xyz[1];
+	let z = xyz[2];
+
+	x /= 95.047;
+	y /= 100;
+	z /= 108.883;
+
+	x = x > 0.008856 ? (x ** (1 / 3)) : (7.787 * x) + (16 / 116);
+	y = y > 0.008856 ? (y ** (1 / 3)) : (7.787 * y) + (16 / 116);
+	z = z > 0.008856 ? (z ** (1 / 3)) : (7.787 * z) + (16 / 116);
+
+	const l = (116 * y) - 16;
+	const a = 500 * (x - y);
+	const b = 200 * (y - z);
+
+	return [l, a, b];
+};
+
+convert.lab.xyz = function (lab) {
+	const l = lab[0];
+	const a = lab[1];
+	const b = lab[2];
+	let x;
+	let y;
+	let z;
+
+	y = (l + 16) / 116;
+	x = a / 500 + y;
+	z = y - b / 200;
+
+	const y2 = y ** 3;
+	const x2 = x ** 3;
+	const z2 = z ** 3;
+	y = y2 > 0.008856 ? y2 : (y - 16 / 116) / 7.787;
+	x = x2 > 0.008856 ? x2 : (x - 16 / 116) / 7.787;
+	z = z2 > 0.008856 ? z2 : (z - 16 / 116) / 7.787;
+
+	x *= 95.047;
+	y *= 100;
+	z *= 108.883;
+
+	return [x, y, z];
+};
+
+convert.lab.lch = function (lab) {
+	const l = lab[0];
+	const a = lab[1];
+	const b = lab[2];
+	let h;
+
+	const hr = Math.atan2(b, a);
+	h = hr * 360 / 2 / Math.PI;
+
+	if (h < 0) {
+		h += 360;
+	}
+
+	const c = Math.sqrt(a * a + b * b);
+
+	return [l, c, h];
+};
+
+convert.lch.lab = function (lch) {
+	const l = lch[0];
+	const c = lch[1];
+	const h = lch[2];
+
+	const hr = h / 360 * 2 * Math.PI;
+	const a = c * Math.cos(hr);
+	const b = c * Math.sin(hr);
+
+	return [l, a, b];
+};
+
+convert.rgb.ansi16 = function (args, saturation = null) {
+	const [r, g, b] = args;
+	let value = saturation === null ? convert.rgb.hsv(args)[2] : saturation; // Hsv -> ansi16 optimization
+
+	value = Math.round(value / 50);
+
+	if (value === 0) {
+		return 30;
+	}
+
+	let ansi = 30
+		+ ((Math.round(b / 255) << 2)
+		| (Math.round(g / 255) << 1)
+		| Math.round(r / 255));
+
+	if (value === 2) {
+		ansi += 60;
+	}
+
+	return ansi;
+};
+
+convert.hsv.ansi16 = function (args) {
+	// Optimization here; we already know the value and don't need to get
+	// it converted for us.
+	return convert.rgb.ansi16(convert.hsv.rgb(args), args[2]);
+};
+
+convert.rgb.ansi256 = function (args) {
+	const r = args[0];
+	const g = args[1];
+	const b = args[2];
+
+	// We use the extended greyscale palette here, with the exception of
+	// black and white. normal palette only has 4 greyscale shades.
+	if (r === g && g === b) {
+		if (r < 8) {
+			return 16;
+		}
+
+		if (r > 248) {
+			return 231;
+		}
+
+		return Math.round(((r - 8) / 247) * 24) + 232;
+	}
+
+	const ansi = 16
+		+ (36 * Math.round(r / 255 * 5))
+		+ (6 * Math.round(g / 255 * 5))
+		+ Math.round(b / 255 * 5);
+
+	return ansi;
+};
+
+convert.ansi16.rgb = function (args) {
+	let color = args % 10;
+
+	// Handle greyscale
+	if (color === 0 || color === 7) {
+		if (args > 50) {
+			color += 3.5;
+		}
+
+		color = color / 10.5 * 255;
+
+		return [color, color, color];
+	}
+
+	const mult = (~~(args > 50) + 1) * 0.5;
+	const r = ((color & 1) * mult) * 255;
+	const g = (((color >> 1) & 1) * mult) * 255;
+	const b = (((color >> 2) & 1) * mult) * 255;
+
+	return [r, g, b];
+};
+
+convert.ansi256.rgb = function (args) {
+	// Handle greyscale
+	if (args >= 232) {
+		const c = (args - 232) * 10 + 8;
+		return [c, c, c];
+	}
+
+	args -= 16;
+
+	let rem;
+	const r = Math.floor(args / 36) / 5 * 255;
+	const g = Math.floor((rem = args % 36) / 6) / 5 * 255;
+	const b = (rem % 6) / 5 * 255;
+
+	return [r, g, b];
+};
+
+convert.rgb.hex = function (args) {
+	const integer = ((Math.round(args[0]) & 0xFF) << 16)
+		+ ((Math.round(args[1]) & 0xFF) << 8)
+		+ (Math.round(args[2]) & 0xFF);
+
+	const string = integer.toString(16).toUpperCase();
+	return '000000'.substring(string.length) + string;
+};
+
+convert.hex.rgb = function (args) {
+	const match = args.toString(16).match(/[a-f0-9]{6}|[a-f0-9]{3}/i);
+	if (!match) {
+		return [0, 0, 0];
+	}
+
+	let colorString = match[0];
+
+	if (match[0].length === 3) {
+		colorString = colorString.split('').map(char => {
+			return char + char;
+		}).join('');
+	}
+
+	const integer = parseInt(colorString, 16);
+	const r = (integer >> 16) & 0xFF;
+	const g = (integer >> 8) & 0xFF;
+	const b = integer & 0xFF;
+
+	return [r, g, b];
+};
+
+convert.rgb.hcg = function (rgb) {
+	const r = rgb[0] / 255;
+	const g = rgb[1] / 255;
+	const b = rgb[2] / 255;
+	const max = Math.max(Math.max(r, g), b);
+	const min = Math.min(Math.min(r, g), b);
+	const chroma = (max - min);
+	let grayscale;
+	let hue;
+
+	if (chroma < 1) {
+		grayscale = min / (1 - chroma);
+	} else {
+		grayscale = 0;
+	}
+
+	if (chroma <= 0) {
+		hue = 0;
+	} else
+	if (max === r) {
+		hue = ((g - b) / chroma) % 6;
+	} else
+	if (max === g) {
+		hue = 2 + (b - r) / chroma;
+	} else {
+		hue = 4 + (r - g) / chroma;
+	}
+
+	hue /= 6;
+	hue %= 1;
+
+	return [hue * 360, chroma * 100, grayscale * 100];
+};
+
+convert.hsl.hcg = function (hsl) {
+	const s = hsl[1] / 100;
+	const l = hsl[2] / 100;
+
+	const c = l < 0.5 ? (2.0 * s * l) : (2.0 * s * (1.0 - l));
+
+	let f = 0;
+	if (c < 1.0) {
+		f = (l - 0.5 * c) / (1.0 - c);
+	}
+
+	return [hsl[0], c * 100, f * 100];
+};
+
+convert.hsv.hcg = function (hsv) {
+	const s = hsv[1] / 100;
+	const v = hsv[2] / 100;
+
+	const c = s * v;
+	let f = 0;
+
+	if (c < 1.0) {
+		f = (v - c) / (1 - c);
+	}
+
+	return [hsv[0], c * 100, f * 100];
+};
+
+convert.hcg.rgb = function (hcg) {
+	const h = hcg[0] / 360;
+	const c = hcg[1] / 100;
+	const g = hcg[2] / 100;
+
+	if (c === 0.0) {
+		return [g * 255, g * 255, g * 255];
+	}
+
+	const pure = [0, 0, 0];
+	const hi = (h % 1) * 6;
+	const v = hi % 1;
+	const w = 1 - v;
+	let mg = 0;
+
+	/* eslint-disable max-statements-per-line */
+	switch (Math.floor(hi)) {
+		case 0:
+			pure[0] = 1; pure[1] = v; pure[2] = 0; break;
+		case 1:
+			pure[0] = w; pure[1] = 1; pure[2] = 0; break;
+		case 2:
+			pure[0] = 0; pure[1] = 1; pure[2] = v; break;
+		case 3:
+			pure[0] = 0; pure[1] = w; pure[2] = 1; break;
+		case 4:
+			pure[0] = v; pure[1] = 0; pure[2] = 1; break;
+		default:
+			pure[0] = 1; pure[1] = 0; pure[2] = w;
+	}
+	/* eslint-enable max-statements-per-line */
+
+	mg = (1.0 - c) * g;
+
+	return [
+		(c * pure[0] + mg) * 255,
+		(c * pure[1] + mg) * 255,
+		(c * pure[2] + mg) * 255
+	];
+};
+
+convert.hcg.hsv = function (hcg) {
+	const c = hcg[1] / 100;
+	const g = hcg[2] / 100;
+
+	const v = c + g * (1.0 - c);
+	let f = 0;
+
+	if (v > 0.0) {
+		f = c / v;
+	}
+
+	return [hcg[0], f * 100, v * 100];
+};
+
+convert.hcg.hsl = function (hcg) {
+	const c = hcg[1] / 100;
+	const g = hcg[2] / 100;
+
+	const l = g * (1.0 - c) + 0.5 * c;
+	let s = 0;
+
+	if (l > 0.0 && l < 0.5) {
+		s = c / (2 * l);
+	} else
+	if (l >= 0.5 && l < 1.0) {
+		s = c / (2 * (1 - l));
+	}
+
+	return [hcg[0], s * 100, l * 100];
+};
+
+convert.hcg.hwb = function (hcg) {
+	const c = hcg[1] / 100;
+	const g = hcg[2] / 100;
+	const v = c + g * (1.0 - c);
+	return [hcg[0], (v - c) * 100, (1 - v) * 100];
+};
+
+convert.hwb.hcg = function (hwb) {
+	const w = hwb[1] / 100;
+	const b = hwb[2] / 100;
+	const v = 1 - b;
+	const c = v - w;
+	let g = 0;
+
+	if (c < 1) {
+		g = (v - c) / (1 - c);
+	}
+
+	return [hwb[0], c * 100, g * 100];
+};
+
+convert.apple.rgb = function (apple) {
+	return [(apple[0] / 65535) * 255, (apple[1] / 65535) * 255, (apple[2] / 65535) * 255];
+};
+
+convert.rgb.apple = function (rgb) {
+	return [(rgb[0] / 255) * 65535, (rgb[1] / 255) * 65535, (rgb[2] / 255) * 65535];
+};
+
+convert.gray.rgb = function (args) {
+	return [args[0] / 100 * 255, args[0] / 100 * 255, args[0] / 100 * 255];
+};
+
+convert.gray.hsl = function (args) {
+	return [0, 0, args[0]];
+};
+
+convert.gray.hsv = convert.gray.hsl;
+
+convert.gray.hwb = function (gray) {
+	return [0, 100, gray[0]];
+};
+
+convert.gray.cmyk = function (gray) {
+	return [0, 0, 0, gray[0]];
+};
+
+convert.gray.lab = function (gray) {
+	return [gray[0], 0, 0];
+};
+
+convert.gray.hex = function (gray) {
+	const val = Math.round(gray[0] / 100 * 255) & 0xFF;
+	const integer = (val << 16) + (val << 8) + val;
+
+	const string = integer.toString(16).toUpperCase();
+	return '000000'.substring(string.length) + string;
+};
+
+convert.rgb.gray = function (rgb) {
+	const val = (rgb[0] + rgb[1] + rgb[2]) / 3;
+	return [val / 255 * 100];
+};
+
+
+/***/ }),
+
+/***/ 448:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let { exec } = __webpack_require__(129)
+let { existsSync } = __webpack_require__(747)
+let fs = __webpack_require__(747) // Broken out for testing writeFile calls
+let glob = __webpack_require__(402)
+let { basename, dirname, extname, join, sep } = __webpack_require__(622)
+let series = __webpack_require__(712)
+let sha = __webpack_require__(959)
+let sort = __webpack_require__(656)
+let waterfall = __webpack_require__(946)
+let normalizePath = __webpack_require__(376)
+let updater = __webpack_require__(464)
+
+/**
+ * Static asset fingerprinter
+ * - Note: everything uses and assumes *nix-styile file paths, even when running on Windows
+ */
+module.exports = function fingerprint (params, callback) {
+  let { fingerprint = false, ignore = [], inventory, update } = params
+  let { inv, get } = inventory
+
+  // Bail early if this project doesn't utilize static assets
+  if (!inv.static) return callback()
+
+  // Get the folder
+  let staticFolder = get.static('folder') || '' // Should never be falsy but jic
+  let folder = normalizePath(join(process.cwd(), staticFolder))
+
+  // Bail early if the folder isn't present
+  if (!existsSync(folder)) return callback()
+
+  // Ok, we've cleared the pre-reqs, let's go
+  if (!update) update = updater('Assets')
+
+  fingerprint = fingerprint || inv.static.fingerprint
+  ignore = ignore.length ? ignore : inv.static.ignore || []
+
+  // Allow apps and frameworks to handle their own fingerprinting
+  let externalFingerprint = fingerprint === 'external'
+
+  let files
+  let staticManifest = {}
+  waterfall([
+    /**
+     * Early exit if disabled, clean up if necessary
+     */
+    function bail (callback) {
+      if (fingerprint && !externalFingerprint) callback()
+      else {
+        if (existsSync(join(folder, 'static.json'))) {
+          let msg = `Found ${folder + sep}static.json file with fingerprinting ${externalFingerprint ? 'set to external' : 'disabled'}, deleting file`
+          update.warn(msg)
+
+          let remove = process.platform.startsWith('win') ? 'del' : 'rm'
+          exec(`${remove} static.json`, { cwd: folder }, (err, stdout, stderr) => {
+            if (err) callback(err)
+            else {
+              if (stderr) {
+                let msg = `Error removing static.json file, please remove it manually or static asset calls may be broken`
+                update.warn(msg)
+              }
+              callback(Error('cancel'))
+            }
+          })
+        }
+        else callback(Error('cancel'))
+      }
+    },
+
+    /**
+     * Scan for files in the public directory
+     */
+    function globFiles (callback) {
+      let staticAssets = folder + '/**/*'
+      glob(staticAssets, { dot: true, nodir: true, follow: true }, callback)
+    },
+
+    /**
+     * Filter based on default and user-specified ignore rules
+     */
+    function filterFiles (filesFound, callback) {
+      // Always ignore these files
+      ignore = ignore.concat([
+        '.DS_Store',
+        'node_modules',
+        'readme.md',
+        'static.json', // Ignored here, but uploaded later
+      ])
+
+      // Find non-ignored files and sort for readability
+      files = filesFound.filter(file => !ignore.some(i => file.includes(i)))
+      files = sort(files)
+      if (!files.length) {
+        callback(Error('no_files_found'))
+      }
+      else callback()
+    },
+
+    /**
+     * Write (or remove) fingerprinted static asset manifest
+     */
+    function writeStaticManifest (callback) {
+      // Hash those files
+      let hashFiles = files.map(file => {
+        return (callback) => {
+          sha.get(file, function done (err, hash) {
+            if (err) callback(err)
+            else {
+              hash = hash.substr(0, 10)
+              let ext = extname(file)
+              let base = basename(file)
+              let hashed = base.replace(ext, '') + `-${hash}${ext}`
+              // Handle any nested dirs
+              let dir = dirname(file).replace(folder, '').substr(1)
+              dir = `${dir ? dir + '/' : ''}`
+              // Final key + value
+              let staticKey = `${dir ? dir : ''}${base}`
+              let staticValue = `${dir ? dir : ''}${hashed}`
+              // Target shape: {'foo/bar.jpg': 'foo/bar-6bf1794b4c.jpg'}
+              staticManifest[staticKey] = staticValue
+              callback()
+            }
+          })
+        }
+      })
+      series(hashFiles, function done (err) {
+        if (err) callback(err)
+        else {
+          // Write out folder/static.json
+          let file = join(folder, 'static.json')
+          let data = JSON.stringify(staticManifest, null, 2)
+          fs.writeFile(file, data, callback)
+        }
+      })
+    },
+  ],
+  function done (err) {
+    if (err && err.message === 'no_files_found') {
+      let msg = `No static assets found to fingerprint from ${staticFolder}${sep}`
+      update.done(msg)
+      callback()
+    }
+    else if (err && err.message === 'cancel') {
+      callback()
+    }
+    else if (err) {
+      callback(err, staticManifest)
+    }
+    else callback(null, staticManifest)
+  })
+}
+
+
+/***/ }),
+
 /***/ 454:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
-let parser = __webpack_require__(989)
 let read = __webpack_require__(951)
+let series = __webpack_require__(712)
+let parser = __webpack_require__(989)
 let inventoryDefaults = __webpack_require__(332)
 let config = __webpack_require__(373)
 let getEnv = __webpack_require__(745)
 let validate = __webpack_require__(322)
 let get = __webpack_require__(753)
-let errorFmt = __webpack_require__(377)
 
 /**
  * Architect Inventory
@@ -5459,6 +10350,7 @@ let errorFmt = __webpack_require__(377)
  * @returns {object} - Inventory object (including Arc & project defaults and enumerated pragmas) & config getter
  */
 module.exports = function architectInventory (params = {}, callback) {
+
   // Set up promise if there's no callback
   let promise
   if (!callback) {
@@ -5469,75 +10361,70 @@ module.exports = function architectInventory (params = {}, callback) {
     })
   }
 
-  let errors = []
+  let errors
+  let inventory
+  try {
+    // Always ensure we have a working dir
+    params.cwd = params.cwd || process.cwd()
+    let { cwd, rawArc } = params
 
-  // Always ensure we have a working dir
-  params.cwd = params.cwd || process.cwd()
-  let { cwd, rawArc } = params
-
-  // Stateless inventory run
-  if (rawArc) {
-    try {
+    // Stateless inventory run
+    if (rawArc) {
       var arc = parser(rawArc)
       var raw = rawArc
       var filepath = false
     }
-    catch (err) {
-      errors.push(`Problem reading rawArc: ${err.message}`)
+    // Get the Architect project manifest from the filesystem
+    else {
+      var { arc, raw, filepath } = read({ type: 'projectManifest', cwd })
+    }
+
+    // Start building out the inventory
+    inventory = inventoryDefaults(params)
+
+    // Set up project params for config
+    let project = { cwd, arc, raw, filepath, inventory }
+
+    // Populate inventory.arc
+    inventory._arc = config._arc(project)
+
+    // Establish default function config from project + Arc defaults
+    inventory._project = config._project(project)
+
+    // Userland: fill out the pragmas
+    inventory = {
+      ...inventory,
+      ...config.pragmas(project)
     }
   }
-  // Get the Architect project manifest from the filesystem
-  else {
-    var { arc, raw, filepath } = read({ type: 'projectManifest', cwd, errors })
+  catch (err) {
+    errors = err
   }
 
-  // Exit early if supplied Arc is fundamentally broken
-  if (errors.length) {
-    callback(errorFmt({
-      type: 'manifest',
-      errors,
-    }))
-    return promise
-  }
+  series([
+    // End here if first-pass pragma validation failed
+    function _pragmaValidationFailed (callback) {
+      if (errors) callback(errors)
+      else callback()
+    },
 
-  // Start building out the inventory
-  let inventory = inventoryDefaults(params)
+    // Populate environment variables
+    function _getEnv (callback) {
+      getEnv(params, inventory, function done (err, env) {
+        if (err) callback(err)
+        else {
+          inventory._project.env = env
+          callback()
+        }
+      })
+    },
 
-  // Set up project params for config
-  let project = { cwd, arc, raw, filepath, inventory }
-
-  // Populate inventory.arc
-  inventory._arc = config._arc(project)
-
-  // Establish default function config from project + Arc defaults
-  inventory._project = config._project(project, errors)
-
-  // Userland: fill out the pragmas
-  inventory = {
-    ...inventory,
-    ...config.pragmas(project, errors)
-  }
-
-  // End here if first-pass pragma validation failed
-  if (errors.length) {
-    callback(errorFmt({
-      type: 'validation',
-      errors,
-      inventory,
-    }))
-    return promise
-  }
-
-  // Final validation pass
-  let err = validate(params, inventory)
-  if (err) {
-    callback(err)
-    return promise
-  }
-
-  // Maybe get env vars
-  getEnv(params, inventory, function done (err) {
-    /* istanbul ignore next: yeah we know what happens here */
+    // Final validation pass
+    function _validate (callback) {
+      validate(params, inventory, callback)
+    }
+  ],
+  function done (err) {
     if (err) callback(err)
     else {
       callback(null, {
@@ -5546,6 +10433,7 @@ module.exports = function architectInventory (params = {}, callback) {
       })
     }
   })
+
   return promise
 }
 
@@ -5563,6 +10451,283 @@ module.exports = function architectInventory (params = {}, callback) {
  */
 module.exports = function notempty (t) {
   return !(t.type == 'comment' || t.type == 'newline' || t.type === 'space')
+}
+
+
+/***/ }),
+
+/***/ 464:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let chalk = __webpack_require__(843)
+let chars = __webpack_require__(438)
+let { printer, spinner } = __webpack_require__(161)
+
+/**
+ * Updater
+ * - `status` - prints an affirmative status update - `chars.start`
+ *   - optional: supporting info on new lines with each additional param
+ * - `start`  - start progress indicator - `spinner`||`chars.start`
+ *   - aliases: `update`
+ * - `done`   - end progress indicator with an update - `chars.done`
+ *   - aliases: `stop`
+ * - `cancel` - cancel progress indicator without update - !char
+ * - `err`    - pretty print an error - `chars.err`
+ *   - aliases: `error` and `fail`
+ * - `warn`   - cancel progress indicator and print a warning
+ *   - aliases: `warn`
+ * - `raw`    - just logs a message as-is (respecting quiet)
+ *
+ * Each method should also return a value to enable capture of progress data
+ */
+module.exports = function updater (name, params = {}) {
+  params.quiet = params.quiet || false
+  let quiet = () => process.env.ARC_QUIET || process.env.QUIET || params.quiet
+  name = name ? chalk.grey(name) : 'Info'
+  let isCI = process.env.CI || process.stdout.isTTY === false
+  if (!quiet() && !isCI) {
+    printer.hideCursor() // Disable cursor while updating
+    printer.restoreCursor() // Restore cursor on exit
+  }
+  let running = false
+  let { frames, timing } = spinner
+
+  function progressIndicator (info) {
+    // End-user progress mode
+    if (!running && !isCI && !quiet()) {
+      let i = 0
+      running = setInterval(function () {
+        printer.write(`${chalk.cyan(frames[i = ++i % frames.length])} ${info}`)
+        printer.reset()
+      }, timing)
+    }
+    // CI mode: updates console with status messages but not animations
+    else if (!running && isCI && !quiet()) {
+      console.log(`${chars.start} ${info}`)
+    }
+  }
+
+  // Optionally pass a message and/or post a multi-line supporting status update
+  function status (msg, ...more) {
+    msg = msg ? chalk.cyan(msg) : ''
+    let info = msg ? `${chars.start} ${name} ${msg}`.trim() : ''
+    if (running) cancel()
+    if (!quiet() && info) console.log(info) // Check for msg so as not to print an empty line
+    if (more.length) {
+      more.forEach(i => {
+        let add = chalk.dim(`  | ${i}`)
+        if (!quiet()) console.log(add)
+        info += `\n${add}`
+      })
+    }
+
+    return info
+  }
+
+  function start (msg) {
+    msg = msg ? chalk.cyan(msg) : ''
+    let info = `${name} ${msg}`.trim()
+    if (running) cancel()
+    progressIndicator(info)
+    return `${chars.start} ${info}`
+  }
+
+  function done (newName, msg) {
+    if (!msg) {
+      msg = newName
+      newName = ''
+    }
+    if (newName) newName = chalk.grey(newName)
+    if (msg) msg = chalk.cyan(msg)
+    cancel() // Maybe clear running status and reset
+    let info = `${chars.done} ${newName ? newName : name} ${msg ? msg : ''}`.trim()
+
+    if (!quiet()) console.log(info)
+    return info
+  }
+
+  function cancel () {
+    if (running) {
+      clearInterval(running)
+      printer.reset()
+      printer.clear()
+      running = false // Prevent accidental second done print
+    }
+  }
+
+  function err (error) {
+    if (running) cancel()
+    let isErr = error instanceof Error
+    let name = isErr ? error.name : 'Error'
+    let msg = isErr ? error.message : error
+    let info = `${chars.err} ${chalk.red(name + ':')} ${msg}`.trim()
+    if (isErr) {
+      info += '\n' + error.stack.split('\n').slice(1).join('\n')
+    }
+    console.log(info)
+    return info
+  }
+
+  function warn (warning) {
+    if (running) cancel()
+    if (warning instanceof Error) warning = warning.message
+    let info = `${chars.warn} ${chalk.yellow('Warning:')} ${warning}`.trim()
+
+    if (!quiet()) console.log(info)
+    return info
+  }
+
+  function raw (msg) {
+    if (!quiet()) console.log(msg)
+    return msg
+  }
+
+  return {
+    start,
+    update: start,
+    status,
+    done,
+    stop: done,
+    cancel,
+    err,
+    error: err,
+    fail: err,
+    warn,
+    warning: warn,
+    raw,
+  }
+}
+
+// For whatever reason signal-exit doesn't catch SIGINT, so do this
+process.on('SIGINT', () => {
+  printer.restoreCursor()
+  console.log('')
+  process.exit()
+})
+
+
+/***/ }),
+
+/***/ 466:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+var Stream = __webpack_require__(413).Stream
+
+module.exports = legacy
+
+function legacy (fs) {
+  return {
+    ReadStream: ReadStream,
+    WriteStream: WriteStream
+  }
+
+  function ReadStream (path, options) {
+    if (!(this instanceof ReadStream)) return new ReadStream(path, options);
+
+    Stream.call(this);
+
+    var self = this;
+
+    this.path = path;
+    this.fd = null;
+    this.readable = true;
+    this.paused = false;
+
+    this.flags = 'r';
+    this.mode = 438; /*=0666*/
+    this.bufferSize = 64 * 1024;
+
+    options = options || {};
+
+    // Mixin options into this
+    var keys = Object.keys(options);
+    for (var index = 0, length = keys.length; index < length; index++) {
+      var key = keys[index];
+      this[key] = options[key];
+    }
+
+    if (this.encoding) this.setEncoding(this.encoding);
+
+    if (this.start !== undefined) {
+      if ('number' !== typeof this.start) {
+        throw TypeError('start must be a Number');
+      }
+      if (this.end === undefined) {
+        this.end = Infinity;
+      } else if ('number' !== typeof this.end) {
+        throw TypeError('end must be a Number');
+      }
+
+      if (this.start > this.end) {
+        throw new Error('start must be <= end');
+      }
+
+      this.pos = this.start;
+    }
+
+    if (this.fd !== null) {
+      process.nextTick(function() {
+        self._read();
+      });
+      return;
+    }
+
+    fs.open(this.path, this.flags, this.mode, function (err, fd) {
+      if (err) {
+        self.emit('error', err);
+        self.readable = false;
+        return;
+      }
+
+      self.fd = fd;
+      self.emit('open', fd);
+      self._read();
+    })
+  }
+
+  function WriteStream (path, options) {
+    if (!(this instanceof WriteStream)) return new WriteStream(path, options);
+
+    Stream.call(this);
+
+    this.path = path;
+    this.fd = null;
+    this.writable = true;
+
+    this.flags = 'w';
+    this.encoding = 'binary';
+    this.mode = 438; /*=0666*/
+    this.bytesWritten = 0;
+
+    options = options || {};
+
+    // Mixin options into this
+    var keys = Object.keys(options);
+    for (var index = 0, length = keys.length; index < length; index++) {
+      var key = keys[index];
+      this[key] = options[key];
+    }
+
+    if (this.start !== undefined) {
+      if ('number' !== typeof this.start) {
+        throw TypeError('start must be a Number');
+      }
+      if (this.start < 0) {
+        throw new Error('start must be >= zero');
+      }
+
+      this.pos = this.start;
+    }
+
+    this.busy = false;
+    this._queue = [];
+
+    if (this.fd === null) {
+      this._open = fs.open;
+      this._queue.push([this._open, this.path, this.flags, this.mode, undefined]);
+      this.flush();
+    }
+  }
 }
 
 
@@ -5880,16 +11045,213 @@ exports.getState = getState;
 
 /***/ }),
 
+/***/ 484:
+/***/ (function(module) {
+
+module.exports = function configureMacros ({ arc }) {
+  if (!arc.macros || !arc.macros.length) return null
+
+  return arc.macros
+}
+
+
+/***/ }),
+
+/***/ 497:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+// Note: since nyc uses this module to output coverage, any lines
+// that are in the direct sync flow of nyc's outputCoverage are
+// ignored, since we can never get coverage for them.
+// grab a reference to node's real process object right away
+var process = global.process
+// some kind of non-node environment, just no-op
+if (typeof process !== 'object' || !process) {
+  module.exports = () => {}
+} else {
+  var assert = __webpack_require__(357)
+  var signals = __webpack_require__(654)
+  var isWin = /^win/i.test(process.platform)
+
+  var EE = __webpack_require__(614)
+  /* istanbul ignore if */
+  if (typeof EE !== 'function') {
+    EE = EE.EventEmitter
+  }
+
+  var emitter
+  if (process.__signal_exit_emitter__) {
+    emitter = process.__signal_exit_emitter__
+  } else {
+    emitter = process.__signal_exit_emitter__ = new EE()
+    emitter.count = 0
+    emitter.emitted = {}
+  }
+
+  // Because this emitter is a global, we have to check to see if a
+  // previous version of this library failed to enable infinite listeners.
+  // I know what you're about to say.  But literally everything about
+  // signal-exit is a compromise with evil.  Get used to it.
+  if (!emitter.infinite) {
+    emitter.setMaxListeners(Infinity)
+    emitter.infinite = true
+  }
+
+  module.exports = function (cb, opts) {
+    if (global.process !== process) {
+      return
+    }
+    assert.equal(typeof cb, 'function', 'a callback must be provided for exit handler')
+
+    if (loaded === false) {
+      load()
+    }
+
+    var ev = 'exit'
+    if (opts && opts.alwaysLast) {
+      ev = 'afterexit'
+    }
+
+    var remove = function () {
+      emitter.removeListener(ev, cb)
+      if (emitter.listeners('exit').length === 0 &&
+          emitter.listeners('afterexit').length === 0) {
+        unload()
+      }
+    }
+    emitter.on(ev, cb)
+
+    return remove
+  }
+
+  var unload = function unload () {
+    if (!loaded || global.process !== process) {
+      return
+    }
+    loaded = false
+
+    signals.forEach(function (sig) {
+      try {
+        process.removeListener(sig, sigListeners[sig])
+      } catch (er) {}
+    })
+    process.emit = originalProcessEmit
+    process.reallyExit = originalProcessReallyExit
+    emitter.count -= 1
+  }
+  module.exports.unload = unload
+
+  var emit = function emit (event, code, signal) {
+    if (emitter.emitted[event]) {
+      return
+    }
+    emitter.emitted[event] = true
+    emitter.emit(event, code, signal)
+  }
+
+  // { <signal>: <listener fn>, ... }
+  var sigListeners = {}
+  signals.forEach(function (sig) {
+    sigListeners[sig] = function listener () {
+      if (process !== global.process) {
+        return
+      }
+      // If there are no other listeners, an exit is coming!
+      // Simplest way: remove us and then re-send the signal.
+      // We know that this will kill the process, so we can
+      // safely emit now.
+      var listeners = process.listeners(sig)
+      if (listeners.length === emitter.count) {
+        unload()
+        emit('exit', null, sig)
+        /* istanbul ignore next */
+        emit('afterexit', null, sig)
+        /* istanbul ignore next */
+        if (isWin && sig === 'SIGHUP') {
+          // "SIGHUP" throws an `ENOSYS` error on Windows,
+          // so use a supported signal instead
+          sig = 'SIGINT'
+        }
+        process.kill(process.pid, sig)
+      }
+    }
+  })
+
+  module.exports.signals = function () {
+    return signals
+  }
+
+  var loaded = false
+
+  var load = function load () {
+    if (loaded || process !== global.process) {
+      return
+    }
+    loaded = true
+
+    // This is the number of onSignalExit's that are in play.
+    // It's important so that we can count the correct number of
+    // listeners on signals, and don't wait for the other one to
+    // handle it instead of us.
+    emitter.count += 1
+
+    signals = signals.filter(function (sig) {
+      try {
+        process.on(sig, sigListeners[sig])
+        return true
+      } catch (er) {
+        return false
+      }
+    })
+
+    process.emit = processEmit
+    process.reallyExit = processReallyExit
+  }
+  module.exports.load = load
+
+  var originalProcessReallyExit = process.reallyExit
+  var processReallyExit = function processReallyExit (code) {
+    if (process !== global.process) {
+      return
+    }
+    process.exitCode = code || 0
+    emit('exit', process.exitCode, null)
+    /* istanbul ignore next */
+    emit('afterexit', process.exitCode, null)
+    /* istanbul ignore next */
+    originalProcessReallyExit.call(process, process.exitCode)
+  }
+
+  var originalProcessEmit = process.emit
+  var processEmit = function processEmit (ev, arg) {
+    if (ev === 'exit' && process === global.process) {
+      if (arg !== undefined) {
+        process.exitCode = arg
+      }
+      var ret = originalProcessEmit.apply(this, arguments)
+      emit('exit', process.exitCode, null)
+      /* istanbul ignore next */
+      emit('afterexit', process.exitCode, null)
+      return ret
+    } else {
+      return originalProcessEmit.apply(this, arguments)
+    }
+  }
+}
+
+
+/***/ }),
+
 /***/ 498:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
-let { lambdas } = __webpack_require__(876)
+let lambdaPragmas = __webpack_require__(517)
 
-module.exports = function collectSourceDirs ({ pragmas, errors }) {
+module.exports = function collectSourceDirs ({ pragmas }) {
   let lambdaSrcDirs = []
   let unsortedBySrcDir = {}
   Object.entries(pragmas).forEach(([ pragma, values ]) => {
-    let mayHaveSrcDirs = lambdas.some(p => p === pragma)
+    let mayHaveSrcDirs = lambdaPragmas.some(p => p === pragma)
     if (mayHaveSrcDirs && Array.isArray(values)) {
       pragmas[pragma].forEach(item => {
         if (item.arcStaticAssetProxy === true) return // Special exception for ASAP
@@ -5903,7 +11265,7 @@ module.exports = function collectSourceDirs ({ pragmas, errors }) {
           }
           else unsortedBySrcDir[item.src] = { ...item, pragma }
         }
-        else errors.push(`Lambda is missing source directory: ${JSON.stringify(item, null, 2)}`)
+        else throw Error(`Lambda is missing source directory: ${JSON.stringify(item, null, 2)}`)
       })
     }
   })
@@ -5921,6 +11283,23 @@ module.exports = function collectSourceDirs ({ pragmas, errors }) {
 
   return { lambdaSrcDirs, lambdasBySrcDir }
 }
+
+
+/***/ }),
+
+/***/ 517:
+/***/ (function(module) {
+
+// Enumerates Architect pragmas that (if present) are expected to contain Lambdae
+module.exports = [
+  'events',
+  'http',
+  'plugins',
+  'queues',
+  'scheduled',
+  'streams',
+  'ws'
+]
 
 
 /***/ }),
@@ -5977,30 +11356,265 @@ module.exports = function stringify (obj) {
 
 /***/ }),
 
+/***/ 525:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let populate = __webpack_require__(631)
+
+module.exports = function configureQueues ({ arc, inventory }) {
+  if (!arc.queues || !arc.queues.length) return null
+
+  let queues = populate.queues(arc.queues, inventory)
+
+  return queues
+}
+
+
+/***/ }),
+
 /***/ 537:
 /***/ (function(module) {
 
 // Validates Lambda layer / policy ARNs, prob can't be used for other kinds of ARN
-module.exports = function validateARN ({ arn, region, loc }) {
-  if (typeof arn !== 'string' ||
-      !arn.startsWith('arn:') ||
-      arn.split(':').length !== 8) {
-    /* istanbul ignore next */
-    let lambda = loc ? `in ${loc}` : ''
-    return `Invalid ARN${lambda}: ${arn}`
-  }
+module.exports = function validateARN ({ arn, region }) {
+  let invalid = `- Invalid ARN: ${arn}`
+  try {
+    if (typeof arn !== 'string' || !arn.startsWith('arn:') || arn.split(':').length !== 8) {
+      return invalid
+    }
+    if (region) {
+      let parts = arn.split(':')
+      let layerRegion = parts[3]
+      if (region && region !== layerRegion) {
+        let err = `- Lambda layers must be in the same region as app\n` +
+                  `  - App region: ${region}\n` +
+                  `  - Layer ARN: ${arn}\n` +
+                  `  - Layer region: ${layerRegion ? layerRegion : 'unknown'}`
+        return err
+      }
+    }
 
-  let parts = arn.split(':')
-  let layerRegion = parts[3]
-  if (region !== layerRegion) {
-    /* istanbul ignore next */
-    let lambda = loc ? `  - Lambda: ${loc}\n` : ''
-    let err = `Lambda layers must be in the same region as app\n` + lambda +
-              `  - App region: ${region}\n` +
-              `  - Layer ARN: ${arn}\n` +
-              `  - Layer region: ${layerRegion}`
-    return err
   }
+  // Catch weird issues, like it's just a number or bool
+  catch (err) {
+    return invalid
+  }
+}
+
+
+/***/ }),
+
+/***/ 546:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let { existsSync: exists } = __webpack_require__(747)
+let homeDir = __webpack_require__(87).homedir()
+let { join } = __webpack_require__(622)
+let updater = __webpack_require__(464)
+
+/**
+ * Initialize AWS configuration, in order of preference:
+ * - @aws pragma + ~/.aws/credentials file
+ * - Environment variables
+ * - Dummy creds (if absolutely necessary)
+ */
+module.exports = function initAWS ({ inventory, needsValidCreds = true }) {
+  // AWS SDK intentionally not added to package deps; assume caller already has it
+  // eslint-disable-next-line
+  let aws = __webpack_require__(71)
+  let credentialsMethod = 'SharedIniFileCredentials'
+  let { inv } = inventory
+  try {
+    let defaultCredsPath = join(homeDir, '.aws', 'credentials')
+    let envCredsPath = process.env.AWS_SHARED_CREDENTIALS_FILE
+    let credsPath = envCredsPath || defaultCredsPath
+    let credsExists = exists(envCredsPath) || exists(defaultCredsPath)
+    // Inventory always sets a dfeault region if not specified
+    process.env.AWS_REGION = inv.aws.region
+    /**
+     * Always ensure we end with a final sanity check on loaded credentials
+     */
+    // Allow local cred file to be overriden by env vars
+    let envOverride = process.env.ARC_AWS_CREDS === 'env'
+    if (credsExists && !envOverride) {
+      let profile = process.env.AWS_PROFILE
+      aws.config.credentials = []
+      if (inv.aws && inv.aws.profile) {
+        process.env.AWS_PROFILE = profile = inv.aws.profile
+      }
+
+      let init = new aws.IniLoader()
+      let opts = {
+        filename: credsPath
+      }
+
+      let profileData =  init.loadFrom(opts)
+      if (!profile) profile = process.env.AWS_PROFILE = 'default'
+      process.env.ARC_AWS_CREDS = 'missing'
+
+      if (profileData[profile]) {
+        process.env.ARC_AWS_CREDS = 'profile'
+
+        if (profileData[profile].credential_process) credentialsMethod = 'ProcessCredentials'
+        aws.config.credentials = new aws[credentialsMethod]({
+          ...opts,
+          profile: process.env.AWS_PROFILE
+        })
+      }
+      else {
+        delete process.env.AWS_PROFILE
+      }
+    }
+    else {
+      let hasEnvVars = process.env.AWS_ACCESS_KEY_ID &&
+                       process.env.AWS_SECRET_ACCESS_KEY
+      if (hasEnvVars) {
+        process.env.ARC_AWS_CREDS = 'env'
+        let params = {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+        }
+        if (process.env.AWS_SESSION_TOKEN) {
+          params.sessionToken = process.env.AWS_SESSION_TOKEN
+        }
+        aws.config.credentials = new aws.Credentials(params)
+      }
+    }
+    credentialCheck()
+    /**
+     * Final credential check to ensure we meet the cred needs of Arc various packages
+     * - Packages that **need** valid creds should be made aware that none are available (ARC_AWS_CREDS = 'missing')
+     * - Others that **do not need** valid creds should work fine when supplied with dummy creds (or none at all, but we'll backfill dummy creds jic)
+     */
+    function credentialCheck () {
+      let creds = aws.config.credentials
+      let noCreds = !creds || process.env.ARC_AWS_CREDS == 'missing'
+      if (noCreds && needsValidCreds) {
+        // Set missing creds flag and let consuming modules handle as necessary
+        process.env.ARC_AWS_CREDS = 'missing'
+      }
+      else if (noCreds && !needsValidCreds) {
+        /**
+         * Any creds will do! (e.g. Sandbox DynamoDB)
+         * - Be sure we backfill Lambda's prepopulated env vars
+         * - sessionToken / AWS_SESSION_TOKEN is optional, skip so as not to introduce unintended side-effects
+         */
+        process.env.ARC_AWS_CREDS = 'dummy'
+        process.env.AWS_ACCESS_KEY_ID = 'xxx'
+        process.env.AWS_SECRET_ACCESS_KEY = 'xxx'
+        aws.config.credentials = new aws.Credentials({
+          accessKeyId: 'xxx',
+          secretAccessKey: 'xxx'
+        })
+      }
+      // If no creds, always unset profile to prevent misleading claims about profile state
+      if (noCreds) {
+        delete process.env.AWS_PROFILE
+      }
+    }
+  }
+  catch (e) {
+    // Don't exit process here; caller should be responsible
+    let update = updater('Startup')
+    update.err(e)
+  }
+}
+
+
+/***/ }),
+
+/***/ 558:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let { join } = __webpack_require__(622)
+let { existsSync } = __webpack_require__(747)
+
+module.exports = function populateStreams ({ type, item, dir, cwd }) {
+  let isObj = typeof item === 'object' && !Array.isArray(item)
+  if (type === 'tables' && isObj) {
+    let name = Object.keys(item)[0]
+    // Check for the legacy dir from before `@tables tablename stream true` generated an @streams item
+    let legacySrc = join(cwd, dir, name)
+    let streamSrc = join(cwd, 'src', 'streams', name)
+    let src = existsSync(legacySrc) ? legacySrc : streamSrc
+    let table = name
+    return { name, src, table }
+  }
+  else if (type === 'streams' && typeof item === 'string') {
+    let name = item
+    let src = join(cwd, dir, name)
+    let table = name
+    return { name, src, table }
+  }
+  else if (type === 'streams' && isObj) {
+    let name = Object.keys(item)[0]
+    let src = item[name].src
+      ? join(cwd, item[name].src)
+      : join(cwd, dir, name)
+    let table = item[name].table
+      ? item[name].table
+      : name
+    return { name, src, table }
+  }
+  throw Error(`Invalid @${type} item: ${item}`)
+}
+
+
+/***/ }),
+
+/***/ 561:
+/***/ (function(module) {
+
+/**
+ * convert .arc typical dash-case-stuff into PascalCaseStuff
+ */
+module.exports = function toLogicalID (str) {
+  str = str.replace(/([A-Z])/g, ' $1')
+  if (str.length === 1)
+    return str.toUpperCase()
+  str = str.replace(/^[\W_]+|[\W_]+$/g, '').toLowerCase()
+  str = str.charAt(0).toUpperCase() + str.slice(1)
+  str = str.replace(/[\W_]+(\w|$)/g, function (_, ch) {
+    return ch.toUpperCase()
+  })
+  if (str === 'Get') return 'GetIndex'
+  else return str
+}
+
+
+/***/ }),
+
+/***/ 565:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let populate = __webpack_require__(631)
+
+/**
+ * `@streams` (formerly `@tables`)
+ * - Originally `@tables {tablename} stream true` created a lambda at src/tables/{tablename}
+ * - This was superseded by `@streams`; `@tables` remains for backwards compat and as a convenience for creating `@streams`
+ *   - If a project has an existing `@tables` Lambda, we'll continue using that so long as the directory exists
+ */
+module.exports = function configureStreams ({ arc, inventory }) {
+  if (!arc.streams && !arc.tables) return null
+
+  // Populate @tables
+  let tables = arc.tables && arc.tables.filter(t => typeof t === 'object' && t[Object.keys(t)[0]].stream === true)
+  if (tables && tables.length) {
+    tables = populate.tables(tables, inventory)
+  }
+  else tables = null
+
+  // Populate @streams
+  let streams = populate.streams(arc.streams, inventory)
+
+  if (tables && streams) {
+    let uniqueTables = tables.filter(t => !streams.some(s => s.table === t.table))
+    let merged = streams.concat(uniqueTables)
+    return merged
+  }
+  else if (streams) return streams
+  return tables
 }
 
 
@@ -6117,6 +11731,94 @@ webpackEmptyContext.id = 590;
 
 /***/ }),
 
+/***/ 592:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+const conversions = __webpack_require__(445);
+const route = __webpack_require__(260);
+
+const convert = {};
+
+const models = Object.keys(conversions);
+
+function wrapRaw(fn) {
+	const wrappedFn = function (...args) {
+		const arg0 = args[0];
+		if (arg0 === undefined || arg0 === null) {
+			return arg0;
+		}
+
+		if (arg0.length > 1) {
+			args = arg0;
+		}
+
+		return fn(args);
+	};
+
+	// Preserve .conversion property if there is one
+	if ('conversion' in fn) {
+		wrappedFn.conversion = fn.conversion;
+	}
+
+	return wrappedFn;
+}
+
+function wrapRounded(fn) {
+	const wrappedFn = function (...args) {
+		const arg0 = args[0];
+
+		if (arg0 === undefined || arg0 === null) {
+			return arg0;
+		}
+
+		if (arg0.length > 1) {
+			args = arg0;
+		}
+
+		const result = fn(args);
+
+		// We're assuming the result is an array here.
+		// see notice in conversions.js; don't use box types
+		// in conversion functions.
+		if (typeof result === 'object') {
+			for (let len = result.length, i = 0; i < len; i++) {
+				result[i] = Math.round(result[i]);
+			}
+		}
+
+		return result;
+	};
+
+	// Preserve .conversion property if there is one
+	if ('conversion' in fn) {
+		wrappedFn.conversion = fn.conversion;
+	}
+
+	return wrappedFn;
+}
+
+models.forEach(fromModel => {
+	convert[fromModel] = {};
+
+	Object.defineProperty(convert[fromModel], 'channels', {value: conversions[fromModel].channels});
+	Object.defineProperty(convert[fromModel], 'labels', {value: conversions[fromModel].labels});
+
+	const routes = route(fromModel);
+	const routeModels = Object.keys(routes);
+
+	routeModels.forEach(toModel => {
+		const fn = routes[toModel];
+
+		convert[fromModel][toModel] = wrapRounded(fn);
+		convert[fromModel][toModel].raw = wrapRaw(fn);
+	});
+});
+
+module.exports = convert;
+
+
+/***/ }),
+
 /***/ 594:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
@@ -6124,13 +11826,13 @@ let read = __webpack_require__(951)
 let validate = __webpack_require__(850)
 let { homedir } = __webpack_require__(87)
 
-module.exports = function getPrefs ({ scope, inventory, errors }) {
+module.exports = function getPrefs ({ scope, inventory }) {
   let cwd = scope === 'global'
     ? homedir()
     : inventory._project.src
 
   // Populate preferences
-  let prefs = read({ type: 'preferences', cwd, errors })
+  let prefs = read({ type: 'preferences', cwd })
   if (prefs.filepath) {
     let preferences = {}
     // Ok, this gets a bit hairy
@@ -6138,30 +11840,23 @@ module.exports = function getPrefs ({ scope, inventory, errors }) {
     // Basically, construct a pared-down intermediate prefs obj for consumers
     Object.entries(prefs.arc).forEach(([ key, val ]) => {
       // TODO add additional preferences checks and normalization
-
-      /* istanbul ignore else */ // Parser should get this, but jic
       if (!preferences[key]) preferences[key] = {}
-      /* istanbul ignore else */ // Parser should only produce arrays, but jic
       if (Array.isArray(val)) {
         val.forEach(v => {
           if (Array.isArray(v)) {
-            /* istanbul ignore if */ // Single vals should be strings, but jic
             if (v.length === 1)       preferences[key] = v[0]
             else if (v.length === 2)  preferences[key][v[0]] = v[1]
-            /* istanbul ignore else */ // Should be cornered, but jic
             else if (v.length > 2)    preferences[key][v[0]] = [ ...v.slice(1) ]
           }
           else if (typeof v === 'object' && Object.keys(v).length) {
             Object.keys(v).forEach(k => preferences[key][k] = v[k])
           }
-          /* istanbul ignore else */ // Should be cornered, but jic
           else if (!Array.isArray(v)) preferences[key] = v
         })
       }
       // Turn env vars with spaces into strings
       if (key === 'env') {
         [ 'testing', 'staging', 'production' ].forEach(e => {
-          /* istanbul ignore else */ // Yet another jic
           if (preferences.env[e]) {
             Object.entries(preferences.env[e]).forEach(([ key, val ]) => {
               if (Array.isArray(val)) preferences.env[e][key] = val.join(' ')
@@ -6173,13 +11868,12 @@ module.exports = function getPrefs ({ scope, inventory, errors }) {
       if (key === 'sandbox-startup') {
         preferences[key] = val.map(v => {
           if (typeof v === 'string') return v
-          /* istanbul ignore else */ // Yet another jic
           if (Array.isArray(v)) return v.join(' ')
         })
       }
     })
 
-    validate(preferences, errors)
+    validate(preferences)
 
     return {
       preferences: {
@@ -6200,59 +11894,493 @@ module.exports = function getPrefs ({ scope, inventory, errors }) {
 /***/ 597:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
-let { sep } = __webpack_require__(622)
-let { lambdas } = __webpack_require__(876)
 let validateARN = __webpack_require__(537)
+let { sep } = __webpack_require__(622)
 
 /**
  * Layer validator
+ * @param {array} layers - Layers to check
+ * @param {string} region - Current configured AWS region
+ * @param {string} location - Item containing potentially offending layer config
  */
-module.exports = function layerValidator (params, inventory, errors) {
-  let { region } = inventory.aws
-  let { cwd, validateLayers = true } = params
-
-  // Shouldn't be possible because we backfill region, but jic
-  if (!region) throw ReferenceError('Region not found')
-
-  // Allow for manual opt-out of layer validation
-  if (!validateLayers) return
-
-  // Walk the tree of layer configs, starting with @aws
-  Object.entries(inventory).forEach(([ i ]) => {
-    let item = inventory[i]
-    if (i === 'aws') {
-      let location = inventory._project.manifest &&
-                     inventory._project.manifest.replace(cwd, '')
-      let layers = item.layers
-      validateLayer({ layers, region, location })
+module.exports = function validate (params, callback) {
+  let { layers, region, location } = params
+  if (!layers || !layers.length) callback()
+  else {
+    let err = []
+    if (layers.length > 5) {
+      let layerList = '\n  - ' + layers.join('\n  - ')
+      err.push(`- Lambda can only be configured with up to 5 layers; got:${layerList}`)
     }
-    else if (lambdas.some(p => p === i) && item) {
-      item.forEach(entry => {
-        // Probably unnecessary if no configFile is present but why not, let's be extra safe
-        let location = entry.configFile && entry.configFile.replace(cwd, '')
-        let layers = entry.config.layers
-        validateLayer({ layers, region, location })
-      })
+    // CloudFormation fails without a helpful error if any layers aren't in the same region as the app because CloudFormation
+    for (let arn of layers) {
+      let arnError = validateARN({ arn, region })
+      if (arnError) err.push(arnError)
     }
-  })
 
-  function validateLayer ({ layers, region, location }) {
-    let loc = location && location.startsWith(sep) ? location.substr(1) : location
-    let lambda = loc ? `  - Lambda: ${loc}\n` : ''
-    if (!layers || !layers.length) return
-    else {
-      if (layers.length > 5) {
-        let list = `  - Layers:\n ${layers.map(l => `    - ${l}`).join('\n')}`
-        errors.push(`Lambda can only be configured with up to 5 layers\n${lambda}${list}`)
-      }
-      // CloudFormation fails without a helpful error if any layers aren't in the same region as the app because CloudFormation
-      for (let arn of layers) {
-        let arnError = validateARN({ arn, region, loc })
-        if (arnError) errors.push(arnError)
-      }
+    if (err.length) {
+      // Location may be missing if running statelessly
+      location = location && location.startsWith(sep) ? location.substr(1) : location
+      let loc = location ? ' in ' + location : ''
+      let msg = `Layer validation error${err.length > 1 ? 's' : ''}${loc}:\n${err.join('\n')}`
+      callback(Error(msg))
     }
+    else callback()
   }
 }
+
+
+/***/ }),
+
+/***/ 598:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+var fs = __webpack_require__(747)
+var polyfills = __webpack_require__(250)
+var legacy = __webpack_require__(466)
+var clone = __webpack_require__(608)
+
+var util = __webpack_require__(669)
+
+/* istanbul ignore next - node 0.x polyfill */
+var gracefulQueue
+var previousSymbol
+
+/* istanbul ignore else - node 0.x polyfill */
+if (typeof Symbol === 'function' && typeof Symbol.for === 'function') {
+  gracefulQueue = Symbol.for('graceful-fs.queue')
+  // This is used in testing by future versions
+  previousSymbol = Symbol.for('graceful-fs.previous')
+} else {
+  gracefulQueue = '___graceful-fs.queue'
+  previousSymbol = '___graceful-fs.previous'
+}
+
+function noop () {}
+
+function publishQueue(context, queue) {
+  Object.defineProperty(context, gracefulQueue, {
+    get: function() {
+      return queue
+    }
+  })
+}
+
+var debug = noop
+if (util.debuglog)
+  debug = util.debuglog('gfs4')
+else if (/\bgfs4\b/i.test(process.env.NODE_DEBUG || ''))
+  debug = function() {
+    var m = util.format.apply(util, arguments)
+    m = 'GFS4: ' + m.split(/\n/).join('\nGFS4: ')
+    console.error(m)
+  }
+
+// Once time initialization
+if (!fs[gracefulQueue]) {
+  // This queue can be shared by multiple loaded instances
+  var queue = global[gracefulQueue] || []
+  publishQueue(fs, queue)
+
+  // Patch fs.close/closeSync to shared queue version, because we need
+  // to retry() whenever a close happens *anywhere* in the program.
+  // This is essential when multiple graceful-fs instances are
+  // in play at the same time.
+  fs.close = (function (fs$close) {
+    function close (fd, cb) {
+      return fs$close.call(fs, fd, function (err) {
+        // This function uses the graceful-fs shared queue
+        if (!err) {
+          resetQueue()
+        }
+
+        if (typeof cb === 'function')
+          cb.apply(this, arguments)
+      })
+    }
+
+    Object.defineProperty(close, previousSymbol, {
+      value: fs$close
+    })
+    return close
+  })(fs.close)
+
+  fs.closeSync = (function (fs$closeSync) {
+    function closeSync (fd) {
+      // This function uses the graceful-fs shared queue
+      fs$closeSync.apply(fs, arguments)
+      resetQueue()
+    }
+
+    Object.defineProperty(closeSync, previousSymbol, {
+      value: fs$closeSync
+    })
+    return closeSync
+  })(fs.closeSync)
+
+  if (/\bgfs4\b/i.test(process.env.NODE_DEBUG || '')) {
+    process.on('exit', function() {
+      debug(fs[gracefulQueue])
+      __webpack_require__(357).equal(fs[gracefulQueue].length, 0)
+    })
+  }
+}
+
+if (!global[gracefulQueue]) {
+  publishQueue(global, fs[gracefulQueue]);
+}
+
+module.exports = patch(clone(fs))
+if (process.env.TEST_GRACEFUL_FS_GLOBAL_PATCH && !fs.__patched) {
+    module.exports = patch(fs)
+    fs.__patched = true;
+}
+
+function patch (fs) {
+  // Everything that references the open() function needs to be in here
+  polyfills(fs)
+  fs.gracefulify = patch
+
+  fs.createReadStream = createReadStream
+  fs.createWriteStream = createWriteStream
+  var fs$readFile = fs.readFile
+  fs.readFile = readFile
+  function readFile (path, options, cb) {
+    if (typeof options === 'function')
+      cb = options, options = null
+
+    return go$readFile(path, options, cb)
+
+    function go$readFile (path, options, cb, startTime) {
+      return fs$readFile(path, options, function (err) {
+        if (err && (err.code === 'EMFILE' || err.code === 'ENFILE'))
+          enqueue([go$readFile, [path, options, cb], err, startTime || Date.now(), Date.now()])
+        else {
+          if (typeof cb === 'function')
+            cb.apply(this, arguments)
+        }
+      })
+    }
+  }
+
+  var fs$writeFile = fs.writeFile
+  fs.writeFile = writeFile
+  function writeFile (path, data, options, cb) {
+    if (typeof options === 'function')
+      cb = options, options = null
+
+    return go$writeFile(path, data, options, cb)
+
+    function go$writeFile (path, data, options, cb, startTime) {
+      return fs$writeFile(path, data, options, function (err) {
+        if (err && (err.code === 'EMFILE' || err.code === 'ENFILE'))
+          enqueue([go$writeFile, [path, data, options, cb], err, startTime || Date.now(), Date.now()])
+        else {
+          if (typeof cb === 'function')
+            cb.apply(this, arguments)
+        }
+      })
+    }
+  }
+
+  var fs$appendFile = fs.appendFile
+  if (fs$appendFile)
+    fs.appendFile = appendFile
+  function appendFile (path, data, options, cb) {
+    if (typeof options === 'function')
+      cb = options, options = null
+
+    return go$appendFile(path, data, options, cb)
+
+    function go$appendFile (path, data, options, cb, startTime) {
+      return fs$appendFile(path, data, options, function (err) {
+        if (err && (err.code === 'EMFILE' || err.code === 'ENFILE'))
+          enqueue([go$appendFile, [path, data, options, cb], err, startTime || Date.now(), Date.now()])
+        else {
+          if (typeof cb === 'function')
+            cb.apply(this, arguments)
+        }
+      })
+    }
+  }
+
+  var fs$copyFile = fs.copyFile
+  if (fs$copyFile)
+    fs.copyFile = copyFile
+  function copyFile (src, dest, flags, cb) {
+    if (typeof flags === 'function') {
+      cb = flags
+      flags = 0
+    }
+    return go$copyFile(src, dest, flags, cb)
+
+    function go$copyFile (src, dest, flags, cb, startTime) {
+      return fs$copyFile(src, dest, flags, function (err) {
+        if (err && (err.code === 'EMFILE' || err.code === 'ENFILE'))
+          enqueue([go$copyFile, [src, dest, flags, cb], err, startTime || Date.now(), Date.now()])
+        else {
+          if (typeof cb === 'function')
+            cb.apply(this, arguments)
+        }
+      })
+    }
+  }
+
+  var fs$readdir = fs.readdir
+  fs.readdir = readdir
+  function readdir (path, options, cb) {
+    if (typeof options === 'function')
+      cb = options, options = null
+
+    return go$readdir(path, options, cb)
+
+    function go$readdir (path, options, cb, startTime) {
+      return fs$readdir(path, options, function (err, files) {
+        if (err && (err.code === 'EMFILE' || err.code === 'ENFILE'))
+          enqueue([go$readdir, [path, options, cb], err, startTime || Date.now(), Date.now()])
+        else {
+          if (files && files.sort)
+            files.sort()
+
+          if (typeof cb === 'function')
+            cb.call(this, err, files)
+        }
+      })
+    }
+  }
+
+  if (process.version.substr(0, 4) === 'v0.8') {
+    var legStreams = legacy(fs)
+    ReadStream = legStreams.ReadStream
+    WriteStream = legStreams.WriteStream
+  }
+
+  var fs$ReadStream = fs.ReadStream
+  if (fs$ReadStream) {
+    ReadStream.prototype = Object.create(fs$ReadStream.prototype)
+    ReadStream.prototype.open = ReadStream$open
+  }
+
+  var fs$WriteStream = fs.WriteStream
+  if (fs$WriteStream) {
+    WriteStream.prototype = Object.create(fs$WriteStream.prototype)
+    WriteStream.prototype.open = WriteStream$open
+  }
+
+  Object.defineProperty(fs, 'ReadStream', {
+    get: function () {
+      return ReadStream
+    },
+    set: function (val) {
+      ReadStream = val
+    },
+    enumerable: true,
+    configurable: true
+  })
+  Object.defineProperty(fs, 'WriteStream', {
+    get: function () {
+      return WriteStream
+    },
+    set: function (val) {
+      WriteStream = val
+    },
+    enumerable: true,
+    configurable: true
+  })
+
+  // legacy names
+  var FileReadStream = ReadStream
+  Object.defineProperty(fs, 'FileReadStream', {
+    get: function () {
+      return FileReadStream
+    },
+    set: function (val) {
+      FileReadStream = val
+    },
+    enumerable: true,
+    configurable: true
+  })
+  var FileWriteStream = WriteStream
+  Object.defineProperty(fs, 'FileWriteStream', {
+    get: function () {
+      return FileWriteStream
+    },
+    set: function (val) {
+      FileWriteStream = val
+    },
+    enumerable: true,
+    configurable: true
+  })
+
+  function ReadStream (path, options) {
+    if (this instanceof ReadStream)
+      return fs$ReadStream.apply(this, arguments), this
+    else
+      return ReadStream.apply(Object.create(ReadStream.prototype), arguments)
+  }
+
+  function ReadStream$open () {
+    var that = this
+    open(that.path, that.flags, that.mode, function (err, fd) {
+      if (err) {
+        if (that.autoClose)
+          that.destroy()
+
+        that.emit('error', err)
+      } else {
+        that.fd = fd
+        that.emit('open', fd)
+        that.read()
+      }
+    })
+  }
+
+  function WriteStream (path, options) {
+    if (this instanceof WriteStream)
+      return fs$WriteStream.apply(this, arguments), this
+    else
+      return WriteStream.apply(Object.create(WriteStream.prototype), arguments)
+  }
+
+  function WriteStream$open () {
+    var that = this
+    open(that.path, that.flags, that.mode, function (err, fd) {
+      if (err) {
+        that.destroy()
+        that.emit('error', err)
+      } else {
+        that.fd = fd
+        that.emit('open', fd)
+      }
+    })
+  }
+
+  function createReadStream (path, options) {
+    return new fs.ReadStream(path, options)
+  }
+
+  function createWriteStream (path, options) {
+    return new fs.WriteStream(path, options)
+  }
+
+  var fs$open = fs.open
+  fs.open = open
+  function open (path, flags, mode, cb) {
+    if (typeof mode === 'function')
+      cb = mode, mode = null
+
+    return go$open(path, flags, mode, cb)
+
+    function go$open (path, flags, mode, cb, startTime) {
+      return fs$open(path, flags, mode, function (err, fd) {
+        if (err && (err.code === 'EMFILE' || err.code === 'ENFILE'))
+          enqueue([go$open, [path, flags, mode, cb], err, startTime || Date.now(), Date.now()])
+        else {
+          if (typeof cb === 'function')
+            cb.apply(this, arguments)
+        }
+      })
+    }
+  }
+
+  return fs
+}
+
+function enqueue (elem) {
+  debug('ENQUEUE', elem[0].name, elem[1])
+  fs[gracefulQueue].push(elem)
+  retry()
+}
+
+// keep track of the timeout between retry() calls
+var retryTimer
+
+// reset the startTime and lastTime to now
+// this resets the start of the 60 second overall timeout as well as the
+// delay between attempts so that we'll retry these jobs sooner
+function resetQueue () {
+  var now = Date.now()
+  for (var i = 0; i < fs[gracefulQueue].length; ++i) {
+    // entries that are only a length of 2 are from an older version, don't
+    // bother modifying those since they'll be retried anyway.
+    if (fs[gracefulQueue][i].length > 2) {
+      fs[gracefulQueue][i][3] = now // startTime
+      fs[gracefulQueue][i][4] = now // lastTime
+    }
+  }
+  // call retry to make sure we're actively processing the queue
+  retry()
+}
+
+function retry () {
+  // clear the timer and remove it to help prevent unintended concurrency
+  clearTimeout(retryTimer)
+  retryTimer = undefined
+
+  if (fs[gracefulQueue].length === 0)
+    return
+
+  var elem = fs[gracefulQueue].shift()
+  var fn = elem[0]
+  var args = elem[1]
+  // these items may be unset if they were added by an older graceful-fs
+  var err = elem[2]
+  var startTime = elem[3]
+  var lastTime = elem[4]
+
+  // if we don't have a startTime we have no way of knowing if we've waited
+  // long enough, so go ahead and retry this item now
+  if (startTime === undefined) {
+    debug('RETRY', fn.name, args)
+    fn.apply(null, args)
+  } else if (Date.now() - startTime >= 60000) {
+    // it's been more than 60 seconds total, bail now
+    debug('TIMEOUT', fn.name, args)
+    var cb = args.pop()
+    if (typeof cb === 'function')
+      cb.call(null, err)
+  } else {
+    // the amount of time between the last attempt and right now
+    var sinceAttempt = Date.now() - lastTime
+    // the amount of time between when we first tried, and when we last tried
+    // rounded up to at least 1
+    var sinceStart = Math.max(lastTime - startTime, 1)
+    // backoff. wait longer than the total time we've been retrying, but only
+    // up to a maximum of 100ms
+    var desiredDelay = Math.min(sinceStart * 1.2, 100)
+    // it's been long enough since the last retry, do it again
+    if (sinceAttempt >= desiredDelay) {
+      debug('RETRY', fn.name, args)
+      fn.apply(null, args.concat([startTime]))
+    } else {
+      // if we can't do this job yet, push it to the end of the queue
+      // and let the next iteration check again
+      fs[gracefulQueue].push(elem)
+    }
+  }
+
+  // schedule our next run if one isn't already scheduled
+  if (retryTimer === undefined) {
+    retryTimer = setTimeout(retry, 0)
+  }
+}
+
+
+/***/ }),
+
+/***/ 599:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+const onetime = __webpack_require__(723);
+const signalExit = __webpack_require__(497);
+
+module.exports = onetime(() => {
+	signalExit(() => {
+		process.stderr.write('\u001B[?25h');
+	}, {alwaysLast: true});
+});
 
 
 /***/ }),
@@ -6283,6 +12411,263 @@ module.exports = async function getPaths() {
 
 /***/ }),
 
+/***/ 606:
+/***/ (function(module) {
+
+"use strict";
+
+const TEMPLATE_REGEX = /(?:\\(u(?:[a-f\d]{4}|\{[a-f\d]{1,6}\})|x[a-f\d]{2}|.))|(?:\{(~)?(\w+(?:\([^)]*\))?(?:\.\w+(?:\([^)]*\))?)*)(?:[ \t]|(?=\r?\n)))|(\})|((?:.|[\r\n\f])+?)/gi;
+const STYLE_REGEX = /(?:^|\.)(\w+)(?:\(([^)]*)\))?/g;
+const STRING_REGEX = /^(['"])((?:\\.|(?!\1)[^\\])*)\1$/;
+const ESCAPE_REGEX = /\\(u(?:[a-f\d]{4}|{[a-f\d]{1,6}})|x[a-f\d]{2}|.)|([^\\])/gi;
+
+const ESCAPES = new Map([
+	['n', '\n'],
+	['r', '\r'],
+	['t', '\t'],
+	['b', '\b'],
+	['f', '\f'],
+	['v', '\v'],
+	['0', '\0'],
+	['\\', '\\'],
+	['e', '\u001B'],
+	['a', '\u0007']
+]);
+
+function unescape(c) {
+	const u = c[0] === 'u';
+	const bracket = c[1] === '{';
+
+	if ((u && !bracket && c.length === 5) || (c[0] === 'x' && c.length === 3)) {
+		return String.fromCharCode(parseInt(c.slice(1), 16));
+	}
+
+	if (u && bracket) {
+		return String.fromCodePoint(parseInt(c.slice(2, -1), 16));
+	}
+
+	return ESCAPES.get(c) || c;
+}
+
+function parseArguments(name, arguments_) {
+	const results = [];
+	const chunks = arguments_.trim().split(/\s*,\s*/g);
+	let matches;
+
+	for (const chunk of chunks) {
+		const number = Number(chunk);
+		if (!Number.isNaN(number)) {
+			results.push(number);
+		} else if ((matches = chunk.match(STRING_REGEX))) {
+			results.push(matches[2].replace(ESCAPE_REGEX, (m, escape, character) => escape ? unescape(escape) : character));
+		} else {
+			throw new Error(`Invalid Chalk template style argument: ${chunk} (in style '${name}')`);
+		}
+	}
+
+	return results;
+}
+
+function parseStyle(style) {
+	STYLE_REGEX.lastIndex = 0;
+
+	const results = [];
+	let matches;
+
+	while ((matches = STYLE_REGEX.exec(style)) !== null) {
+		const name = matches[1];
+
+		if (matches[2]) {
+			const args = parseArguments(name, matches[2]);
+			results.push([name].concat(args));
+		} else {
+			results.push([name]);
+		}
+	}
+
+	return results;
+}
+
+function buildStyle(chalk, styles) {
+	const enabled = {};
+
+	for (const layer of styles) {
+		for (const style of layer.styles) {
+			enabled[style[0]] = layer.inverse ? null : style.slice(1);
+		}
+	}
+
+	let current = chalk;
+	for (const [styleName, styles] of Object.entries(enabled)) {
+		if (!Array.isArray(styles)) {
+			continue;
+		}
+
+		if (!(styleName in current)) {
+			throw new Error(`Unknown Chalk style: ${styleName}`);
+		}
+
+		current = styles.length > 0 ? current[styleName](...styles) : current[styleName];
+	}
+
+	return current;
+}
+
+module.exports = (chalk, temporary) => {
+	const styles = [];
+	const chunks = [];
+	let chunk = [];
+
+	// eslint-disable-next-line max-params
+	temporary.replace(TEMPLATE_REGEX, (m, escapeCharacter, inverse, style, close, character) => {
+		if (escapeCharacter) {
+			chunk.push(unescape(escapeCharacter));
+		} else if (style) {
+			const string = chunk.join('');
+			chunk = [];
+			chunks.push(styles.length === 0 ? string : buildStyle(chalk, styles)(string));
+			styles.push({inverse, styles: parseStyle(style)});
+		} else if (close) {
+			if (styles.length === 0) {
+				throw new Error('Found extraneous } in Chalk template literal');
+			}
+
+			chunks.push(buildStyle(chalk, styles)(chunk.join('')));
+			chunk = [];
+			styles.pop();
+		} else {
+			chunk.push(character);
+		}
+	});
+
+	chunks.push(chunk.join(''));
+
+	if (styles.length > 0) {
+		const errMessage = `Chalk template literal is missing ${styles.length} closing bracket${styles.length === 1 ? '' : 's'} (\`}\`)`;
+		throw new Error(errMessage);
+	}
+
+	return chunks.join('');
+};
+
+
+/***/ }),
+
+/***/ 608:
+/***/ (function(module) {
+
+"use strict";
+
+
+module.exports = clone
+
+var getPrototypeOf = Object.getPrototypeOf || function (obj) {
+  return obj.__proto__
+}
+
+function clone (obj) {
+  if (obj === null || typeof obj !== 'object')
+    return obj
+
+  if (obj instanceof Object)
+    var copy = { __proto__: getPrototypeOf(obj) }
+  else
+    var copy = Object.create(null)
+
+  Object.getOwnPropertyNames(obj).forEach(function (key) {
+    Object.defineProperty(copy, key, Object.getOwnPropertyDescriptor(obj, key))
+  })
+
+  return copy
+}
+
+
+/***/ }),
+
+/***/ 614:
+/***/ (function(module) {
+
+module.exports = require("events");
+
+/***/ }),
+
+/***/ 619:
+/***/ (function(module) {
+
+module.exports = require("constants");
+
+/***/ }),
+
+/***/ 621:
+/***/ (function(module) {
+
+"use strict";
+
+module.exports = balanced;
+function balanced(a, b, str) {
+  if (a instanceof RegExp) a = maybeMatch(a, str);
+  if (b instanceof RegExp) b = maybeMatch(b, str);
+
+  var r = range(a, b, str);
+
+  return r && {
+    start: r[0],
+    end: r[1],
+    pre: str.slice(0, r[0]),
+    body: str.slice(r[0] + a.length, r[1]),
+    post: str.slice(r[1] + b.length)
+  };
+}
+
+function maybeMatch(reg, str) {
+  var m = str.match(reg);
+  return m ? m[0] : null;
+}
+
+balanced.range = range;
+function range(a, b, str) {
+  var begs, beg, left, right, result;
+  var ai = str.indexOf(a);
+  var bi = str.indexOf(b, ai + 1);
+  var i = ai;
+
+  if (ai >= 0 && bi > 0) {
+    if(a===b) {
+      return [ai, bi];
+    }
+    begs = [];
+    left = str.length;
+
+    while (i >= 0 && !result) {
+      if (i == ai) {
+        begs.push(i);
+        ai = str.indexOf(a, i + 1);
+      } else if (begs.length == 1) {
+        result = [ begs.pop(), bi ];
+      } else {
+        beg = begs.pop();
+        if (beg < left) {
+          left = beg;
+          right = bi;
+        }
+
+        bi = str.indexOf(b, i + 1);
+      }
+
+      i = ai < bi && ai >= 0 ? ai : bi;
+    }
+
+    if (begs.length) {
+      result = [ left, right ];
+    }
+  }
+
+  return result;
+}
+
+
+/***/ }),
+
 /***/ 622:
 /***/ (function(module) {
 
@@ -6290,27 +12675,162 @@ module.exports = require("path");
 
 /***/ }),
 
-/***/ 647:
+/***/ 631:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
-let { regex, size, unique } = __webpack_require__(739)
+let read = __webpack_require__(951)
+let getHandler = __webpack_require__(64)
+let upsert = __webpack_require__(305)
+
+// Pragma-specific Lambda constructors
+let getHTTP = __webpack_require__(640)
+let getEvents = __webpack_require__(28)
+let getPlugins = __webpack_require__(100)
+let getScheduled = __webpack_require__(986)
+let getWS = __webpack_require__(221)
+let getStreams = __webpack_require__(558)
 
 /**
- * Validate @streams (& @tables streams true)
- *
- * Where possible, attempts to follow DynamoDB validation
- * See: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.NamingRulesDataTypes.html
+ * Build out the Lambda tree
  */
-module.exports = function validateStreams (streams, errors) {
-  if (streams.length) {
-    unique(streams, '@streams', errors)
+function populateLambda (type, pragma, inventory) {
+  if (!pragma || !pragma.length) return null // Jic
 
-    streams.forEach(stream => {
-      let { name } = stream
-      size(name, 3, 255, '@streams', errors)
-      regex(name, 'veryLooseName', '@streams', errors)
+  let createDefaultConfig = () => JSON.parse(JSON.stringify(inventory._project.defaultFunctionConfig))
+  let cwd = inventory._project.src
+
+  // Fill er up
+  let lambdas = []
+
+  for (let item of pragma) {
+    // Get name, source dir, and any pragma-specific properties
+    let results = getLambda({ type, item, cwd, inventory })
+    // some lambda populators (e.g. plugins) may return empty results
+    if (!results) continue
+    // some lambda populators (e.g. plugins) may return multiple results
+    if (!(Array.isArray(results))) results = [ results ]
+
+    results.forEach(result => {
+      let { name, src } = result
+      // Set up fresh config
+      let config = createDefaultConfig()
+
+      // Knock out any pragma-specific early
+      if (type === 'queues') {
+        config.fifo = config.fifo === undefined ? true : config.fifo
+      }
+      if (type === 'http') {
+        if (name.startsWith('get ') || name.startsWith('any ')) config.views = true
+      }
+
+      // Populate the handler before deferring to function config
+      if (item[name] && item[name].handler) config.handler = item[name].handler
+
+      // Now let's check in on the function config
+      let { arc: arcConfig, filepath, errors } = read({ type: 'functionConfig', cwd: src })
+      if (errors) throw Error(errors)
+
+      // Set function config file path (if one is present)
+      let configFile = filepath ? filepath : null
+
+      // Layer any function config over Arc / project defaults
+      if (arcConfig && arcConfig.aws) {
+        config = upsert(config, arcConfig.aws)
+      }
+      if (arcConfig && arcConfig.arc) {
+        config = upsert(config, arcConfig.arc)
+      }
+
+      // Tidy up any irrelevant params
+      if (type !== 'http') {
+        delete config.apigateway
+      }
+
+      // Now we know the final source dir + runtime + handler: assemble handler props
+      let { handlerFile, handlerFunction } = getHandler(config, src)
+
+      let lambda = {
+        name,
+        config,
+        src,
+        handlerFile,
+        handlerFunction,
+        configFile,
+        ...result, // Any other pragma-specific stuff
+      }
+
+      lambdas.push(lambda)
     })
   }
+
+  return lambdas
+}
+
+function getLambda (params) {
+  let { type } = params
+  params.dir = `src/${type}/`
+
+  if (type === 'http')      return getHTTP(params)
+  if (type === 'events')    return getEvents(params)
+  if (type === 'plugins')   return getPlugins(params)
+  if (type === 'queues')    return getEvents(params) // Effectively the same as events
+  if (type === 'scheduled') return getScheduled(params)
+  if (type === 'streams')   return getStreams(params)
+  if (type === 'tables')    return getStreams(params) // Shortcut for creating streams
+  if (type === 'ws')        return getWS(params)
+}
+
+module.exports = {
+  events:     populateLambda.bind({}, 'events'),
+  http:       populateLambda.bind({}, 'http'),
+  plugins:    populateLambda.bind({}, 'plugins'),
+  queues:     populateLambda.bind({}, 'queues'),
+  scheduled:  populateLambda.bind({}, 'scheduled'),
+  streams:    populateLambda.bind({}, 'streams'),
+  tables:     populateLambda.bind({}, 'tables'),
+  ws:         populateLambda.bind({}, 'ws'),
+}
+
+
+/***/ }),
+
+/***/ 640:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let { join } = __webpack_require__(622)
+let { getLambdaName } = __webpack_require__(7)
+
+module.exports = function populateHTTP ({ item, dir, cwd }) {
+  let methods = [ 'get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'any' ]
+  let validMethod = str => methods.some(m => m === str.toLowerCase())
+  let validPath = str => str.match(/^\/[a-zA-Z0-9/\-:._\*]*$/) // TODO add more validation
+  if (Array.isArray(item) && item.length === 2) {
+    let method = item[0].toLowerCase()
+    let path = item[1]
+    let valid = validMethod(method) && validPath(path)
+    if (valid) {
+      let name = `${method} ${path}`
+      let lambdaName = `${method}${getLambdaName(path)}`
+      let src = join(cwd, dir, lambdaName)
+      let route = { name, method, path, src }
+      return route
+    }
+  }
+  else if (typeof item === 'object' && !Array.isArray(item)) {
+    let path = Object.keys(item)[0]
+    let method = item[path].method.toLowerCase()
+    let valid = validMethod(method) && validPath(path)
+    if (valid) {
+      let name = `${method} ${path}`
+      let lambdaName = `${method}${getLambdaName(path)}`
+      let src = item[path].src
+        ? join(cwd, item[path].src)
+        : join(cwd, dir, lambdaName)
+      let route = { name, method, path, src }
+      return route
+    }
+  }
+  throw Error(`Invalid @http item: ${item}`)
 }
 
 
@@ -6322,9 +12842,9 @@ module.exports = function validateStreams (streams, errors) {
 let { join } = __webpack_require__(622)
 let validate = __webpack_require__(689)
 let is = __webpack_require__(300)
-let { lambdas } = __webpack_require__(876)
+let lambdae = __webpack_require__(517)
 
-module.exports = function configureShared ({ arc, pragmas, inventory, errors }) {
+module.exports = function configureShared ({ arc, pragmas, inventory }) {
   if (!pragmas.lambdaSrcDirs) return null
 
   let cwd = inventory._project.src
@@ -6343,11 +12863,7 @@ module.exports = function configureShared ({ arc, pragmas, inventory, errors }) 
         if (key === 'src' && is.string(share[1])) {
           shared.src = share[1]
           foundSrc = true
-          validate.shared(shared.src, cwd, errors)
-          continue
-        }
-        if (key === 'src' && !is.string(share[1])) {
-          errors.push(`@shared invalid setting: ${key}`)
+          validate.shared(shared.src, cwd)
         }
       }
     }
@@ -6356,7 +12872,7 @@ module.exports = function configureShared ({ arc, pragmas, inventory, errors }) 
     let some = !(arc.shared.length === 1 && foundSrc)
     if (some) {
       // Reset shared settings
-      for (let pragma of lambdas) {
+      for (let pragma of lambdae) {
         if (!pragmas[pragma]) continue
         for (let { config } of pragmas[pragma]) {
           config.shared = false
@@ -6367,12 +12883,12 @@ module.exports = function configureShared ({ arc, pragmas, inventory, errors }) 
       for (let pragma of arc.shared) {
         if (is.array(pragma)) continue // Bail on src setting
         if (!is.object(pragma)) {
-          return errors.push(`@shared invalid setting: ${pragma}`)
+          throw Error(`@shared invalid setting: ${p}`)
         }
 
         let p = Object.keys(pragma)[0]
-        if (!lambdas.includes(p)) {
-          return errors.push(`${p} is not a valid @shared pragma`)
+        if (!lambdae.includes(p)) {
+          throw Error(`${p} is not a valid @shared pragma`)
         }
 
         let entries = is.object(pragma[p])
@@ -6382,7 +12898,7 @@ module.exports = function configureShared ({ arc, pragmas, inventory, errors }) 
           let name = p === 'http' ? lambda.join(' ') : lambda
           let fn = pragmas[p].find(n => n.name === name)
           if (!fn) {
-            return errors.push(`@shared ${name} not found in @${p} Lambdas`)
+            throw Error(`@shared ${name} not found in @${p} Lambdas`)
           }
           // Ignore shared into ASAP
           if (!fn.arcStaticAssetProxy) fn.config.shared = true
@@ -6395,7 +12911,7 @@ module.exports = function configureShared ({ arc, pragmas, inventory, errors }) 
   if (!is.exists(shared.src)) return null
 
   // lambda.config.shared was added by function config defaults, or added above
-  for (let pragma of lambdas) {
+  for (let pragma of lambdae) {
     if (!pragmas[pragma]) continue
     for (let { src, config } of pragmas[pragma]) {
       if (config.shared === true && !shared.shared.includes(src)) {
@@ -6404,11 +12920,278 @@ module.exports = function configureShared ({ arc, pragmas, inventory, errors }) 
     }
   }
 
-  // De-dupe (in case multiple functions live at the same src path)
-  shared.shared = [ ...new Set(shared.shared) ]
-
   return shared
 }
+
+
+/***/ }),
+
+/***/ 654:
+/***/ (function(module) {
+
+// This is not the set of all possible signals.
+//
+// It IS, however, the set of all signals that trigger
+// an exit on either Linux or BSD systems.  Linux is a
+// superset of the signal names supported on BSD, and
+// the unknown signals just fail to register, so we can
+// catch that easily enough.
+//
+// Don't bother with SIGKILL.  It's uncatchable, which
+// means that we can't fire any callbacks anyway.
+//
+// If a user does happen to register a handler on a non-
+// fatal signal like SIGWINCH or something, and then
+// exit, it'll end up firing `process.emit('exit')`, so
+// the handler will be fired anyway.
+//
+// SIGBUS, SIGFPE, SIGSEGV and SIGILL, when not raised
+// artificially, inherently leave the process in a
+// state from which it is not safe to try and enter JS
+// listeners.
+module.exports = [
+  'SIGABRT',
+  'SIGALRM',
+  'SIGHUP',
+  'SIGINT',
+  'SIGTERM'
+]
+
+if (process.platform !== 'win32') {
+  module.exports.push(
+    'SIGVTALRM',
+    'SIGXCPU',
+    'SIGXFSZ',
+    'SIGUSR2',
+    'SIGTRAP',
+    'SIGSYS',
+    'SIGQUIT',
+    'SIGIOT'
+    // should detect profiler and enable/disable accordingly.
+    // see #21
+    // 'SIGPROF'
+  )
+}
+
+if (process.platform === 'linux') {
+  module.exports.push(
+    'SIGIO',
+    'SIGPOLL',
+    'SIGPWR',
+    'SIGSTKFLT',
+    'SIGUNUSED'
+  )
+}
+
+
+/***/ }),
+
+/***/ 656:
+/***/ (function(module) {
+
+module.exports = pathsort
+module.exports.standalone = standalone
+
+function pathsort(paths, sep) {
+  sep = sep || '/'
+
+  return paths.map(function(el) {
+    return el.split(sep)
+  }).sort(sorter).map(function(el) {
+    return el.join(sep)
+  })
+}
+
+function sorter(a, b) {
+  var l = Math.max(a.length, b.length)
+  for (var i = 0; i < l; i += 1) {
+    if (!(i in a)) return -1
+    if (!(i in b)) return +1
+    if (a[i].toUpperCase() > b[i].toUpperCase()) return +1
+    if (a[i].toUpperCase() < b[i].toUpperCase()) return -1
+    if (a.length < b.length) return -1
+    if (a.length > b.length) return +1
+  }
+}
+
+function standalone(sep) {
+  sep = sep || '/'
+  return function pathsort(a, b) {
+    return sorter(a.split(sep), b.split(sep))
+  }
+}
+
+
+/***/ }),
+
+/***/ 663:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+/* module decorator */ module = __webpack_require__.nmd(module);
+
+
+const wrapAnsi16 = (fn, offset) => (...args) => {
+	const code = fn(...args);
+	return `\u001B[${code + offset}m`;
+};
+
+const wrapAnsi256 = (fn, offset) => (...args) => {
+	const code = fn(...args);
+	return `\u001B[${38 + offset};5;${code}m`;
+};
+
+const wrapAnsi16m = (fn, offset) => (...args) => {
+	const rgb = fn(...args);
+	return `\u001B[${38 + offset};2;${rgb[0]};${rgb[1]};${rgb[2]}m`;
+};
+
+const ansi2ansi = n => n;
+const rgb2rgb = (r, g, b) => [r, g, b];
+
+const setLazyProperty = (object, property, get) => {
+	Object.defineProperty(object, property, {
+		get: () => {
+			const value = get();
+
+			Object.defineProperty(object, property, {
+				value,
+				enumerable: true,
+				configurable: true
+			});
+
+			return value;
+		},
+		enumerable: true,
+		configurable: true
+	});
+};
+
+/** @type {typeof import('color-convert')} */
+let colorConvert;
+const makeDynamicStyles = (wrap, targetSpace, identity, isBackground) => {
+	if (colorConvert === undefined) {
+		colorConvert = __webpack_require__(592);
+	}
+
+	const offset = isBackground ? 10 : 0;
+	const styles = {};
+
+	for (const [sourceSpace, suite] of Object.entries(colorConvert)) {
+		const name = sourceSpace === 'ansi16' ? 'ansi' : sourceSpace;
+		if (sourceSpace === targetSpace) {
+			styles[name] = wrap(identity, offset);
+		} else if (typeof suite === 'object') {
+			styles[name] = wrap(suite[targetSpace], offset);
+		}
+	}
+
+	return styles;
+};
+
+function assembleStyles() {
+	const codes = new Map();
+	const styles = {
+		modifier: {
+			reset: [0, 0],
+			// 21 isn't widely supported and 22 does the same thing
+			bold: [1, 22],
+			dim: [2, 22],
+			italic: [3, 23],
+			underline: [4, 24],
+			inverse: [7, 27],
+			hidden: [8, 28],
+			strikethrough: [9, 29]
+		},
+		color: {
+			black: [30, 39],
+			red: [31, 39],
+			green: [32, 39],
+			yellow: [33, 39],
+			blue: [34, 39],
+			magenta: [35, 39],
+			cyan: [36, 39],
+			white: [37, 39],
+
+			// Bright color
+			blackBright: [90, 39],
+			redBright: [91, 39],
+			greenBright: [92, 39],
+			yellowBright: [93, 39],
+			blueBright: [94, 39],
+			magentaBright: [95, 39],
+			cyanBright: [96, 39],
+			whiteBright: [97, 39]
+		},
+		bgColor: {
+			bgBlack: [40, 49],
+			bgRed: [41, 49],
+			bgGreen: [42, 49],
+			bgYellow: [43, 49],
+			bgBlue: [44, 49],
+			bgMagenta: [45, 49],
+			bgCyan: [46, 49],
+			bgWhite: [47, 49],
+
+			// Bright color
+			bgBlackBright: [100, 49],
+			bgRedBright: [101, 49],
+			bgGreenBright: [102, 49],
+			bgYellowBright: [103, 49],
+			bgBlueBright: [104, 49],
+			bgMagentaBright: [105, 49],
+			bgCyanBright: [106, 49],
+			bgWhiteBright: [107, 49]
+		}
+	};
+
+	// Alias bright black as gray (and grey)
+	styles.color.gray = styles.color.blackBright;
+	styles.bgColor.bgGray = styles.bgColor.bgBlackBright;
+	styles.color.grey = styles.color.blackBright;
+	styles.bgColor.bgGrey = styles.bgColor.bgBlackBright;
+
+	for (const [groupName, group] of Object.entries(styles)) {
+		for (const [styleName, style] of Object.entries(group)) {
+			styles[styleName] = {
+				open: `\u001B[${style[0]}m`,
+				close: `\u001B[${style[1]}m`
+			};
+
+			group[styleName] = styles[styleName];
+
+			codes.set(style[0], style[1]);
+		}
+
+		Object.defineProperty(styles, groupName, {
+			value: group,
+			enumerable: false
+		});
+	}
+
+	Object.defineProperty(styles, 'codes', {
+		value: codes,
+		enumerable: false
+	});
+
+	styles.color.close = '\u001B[39m';
+	styles.bgColor.close = '\u001B[49m';
+
+	setLazyProperty(styles.color, 'ansi', () => makeDynamicStyles(wrapAnsi16, 'ansi16', ansi2ansi, false));
+	setLazyProperty(styles.color, 'ansi256', () => makeDynamicStyles(wrapAnsi256, 'ansi256', ansi2ansi, false));
+	setLazyProperty(styles.color, 'ansi16m', () => makeDynamicStyles(wrapAnsi16m, 'rgb', rgb2rgb, false));
+	setLazyProperty(styles.bgColor, 'ansi', () => makeDynamicStyles(wrapAnsi16, 'ansi16', ansi2ansi, true));
+	setLazyProperty(styles.bgColor, 'ansi256', () => makeDynamicStyles(wrapAnsi256, 'ansi256', ansi2ansi, true));
+	setLazyProperty(styles.bgColor, 'ansi16m', () => makeDynamicStyles(wrapAnsi16m, 'rgb', rgb2rgb, true));
+
+	return styles;
+}
+
+// Make the export immutable
+Object.defineProperty(module, 'exports', {
+	enumerable: true,
+	get: assembleStyles
+});
 
 
 /***/ }),
@@ -6514,6 +13297,74 @@ function invalid (lambda) {
 
 /***/ }),
 
+/***/ 669:
+/***/ (function(module) {
+
+module.exports = require("util");
+
+/***/ }),
+
+/***/ 674:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+var wrappy = __webpack_require__(11)
+var reqs = Object.create(null)
+var once = __webpack_require__(49)
+
+module.exports = wrappy(inflight)
+
+function inflight (key, cb) {
+  if (reqs[key]) {
+    reqs[key].push(cb)
+    return null
+  } else {
+    reqs[key] = [cb]
+    return makeres(key)
+  }
+}
+
+function makeres (key) {
+  return once(function RES () {
+    var cbs = reqs[key]
+    var len = cbs.length
+    var args = slice(arguments)
+
+    // XXX It's somewhat ambiguous whether a new callback added in this
+    // pass should be queued for later execution if something in the
+    // list of callbacks throws, or if it should just be discarded.
+    // However, it's such an edge case that it hardly matters, and either
+    // choice is likely as surprising as the other.
+    // As it happens, we do go ahead and schedule it for later execution.
+    try {
+      for (var i = 0; i < len; i++) {
+        cbs[i].apply(null, args)
+      }
+    } finally {
+      if (cbs.length > len) {
+        // added more in the interim.
+        // de-zalgo, just in case, but don't call again.
+        cbs.splice(0, len)
+        process.nextTick(function () {
+          RES.apply(null, args)
+        })
+      } else {
+        delete reqs[key]
+      }
+    }
+  })
+}
+
+function slice (args) {
+  var length = args.length
+  var array = []
+
+  for (var i = 0; i < length; i++) array[i] = args[i]
+  return array
+}
+
+
+/***/ }),
+
 /***/ 676:
 /***/ (function(__unusedmodule, __unusedexports, __webpack_require__) {
 
@@ -6553,26 +13404,75 @@ main().catch((error) => {
 
 /***/ }),
 
+/***/ 681:
+/***/ (function(module) {
+
+"use strict";
+
+
+function posix(path) {
+	return path.charAt(0) === '/';
+}
+
+function win32(path) {
+	// https://github.com/nodejs/node/blob/b3fcc245fb25539909ef1d5eaa01dbf92e168633/lib/path.js#L56
+	var splitDeviceRe = /^([a-zA-Z]:|[\\\/]{2}[^\\\/]+[\\\/]+[^\\\/]+)?([\\\/])?([\s\S]*?)$/;
+	var result = splitDeviceRe.exec(path);
+	var device = result[1] || '';
+	var isUnc = Boolean(device && device.charAt(1) !== ':');
+
+	// UNC paths are always absolute
+	return Boolean(result[2] || isUnc);
+}
+
+module.exports = process.platform === 'win32' ? win32 : posix;
+module.exports.posix = posix;
+module.exports.win32 = win32;
+
+
+/***/ }),
+
 /***/ 689:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
-/* eslint-disable global-require */
+let aws = __webpack_require__(46)
+let shared = __webpack_require__(924)
+let { patterns, regex, size } = __webpack_require__(295)
+
 module.exports = {
   // Pragmas and project validation
-  aws:        __webpack_require__(46),
-  events:     __webpack_require__(957),
-  http:       __webpack_require__(315),
-  indexes:    __webpack_require__(65), // Same ruleset as @tables (more or less)
-  proxy:      __webpack_require__(944),
-  tables:     __webpack_require__(65),
-  queues:     __webpack_require__(957), // Same ruleset as @events
-  scheduled:  __webpack_require__(338),
-  shared:     __webpack_require__(924), // Also includes @views
-  streams:    __webpack_require__(647),
-  websockets: __webpack_require__(61),
+  aws,
+  shared, // Also includes views
 
-  // Misc
-  validate: __webpack_require__(739)
+  // TODO prime refactor candidate as we get deeper into validation:
+  // Meta
+  patterns,
+  validate: {
+    regex,
+    size
+  },
+}
+
+
+/***/ }),
+
+/***/ 708:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let { join } = __webpack_require__(622)
+let { existsSync } = __webpack_require__(747)
+
+module.exports = function asapSrc () {
+  // Inventory running as an arc/arc dependency (most common use case)
+  let src = __webpack_require__.ab + "dist"
+  // Inventory running in arc/arc as a global install
+  let global = __webpack_require__.ab + "dist"
+  // Inventory running from a local (symlink) context (usually testing/dev)
+  let local = join(__dirname, '..', '..', 'node_modules', '@architect', 'asap', 'dist')
+  if (!existsSync(__webpack_require__.ab + "dist") && existsSync(global)) src = __webpack_require__.ab + "dist"
+  else if (!existsSync(src) && existsSync(local)) src = local
+
+  return src
 }
 
 
@@ -6591,52 +13491,106 @@ module.exports = function parseTOML (text) {
 
 /***/ }),
 
-/***/ 739:
+/***/ 712:
+/***/ (function(module) {
+
+/*! run-series. MIT License. Feross Aboukhadijeh <https://feross.org/opensource> */
+module.exports = runSeries
+
+function runSeries (tasks, cb) {
+  var current = 0
+  var results = []
+  var isSync = true
+
+  function done (err) {
+    function end () {
+      if (cb) cb(err, results)
+    }
+    if (isSync) process.nextTick(end)
+    else end()
+  }
+
+  function each (err, result) {
+    results.push(result)
+    if (++current >= tasks.length || err) done(err)
+    else tasks[current](each)
+  }
+
+  if (tasks.length > 0) tasks[0](each)
+  else done(null)
+
+  isSync = false
+}
+
+
+/***/ }),
+
+/***/ 723:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
-let is = __webpack_require__(300)
+"use strict";
 
-let patterns = {
-  looseName: new RegExp(/^[a-z][a-zA-Z0-9-_]+$/),
-  strictName: new RegExp(/^[a-z][a-z0-9-]+$/),
-  // DynamoDB, SNS, SQS
-  veryLooseName: new RegExp(/^[a-zA-Z0-9/\-._]*$/),
-}
+const mimicFn = __webpack_require__(750);
 
-function regex (value, pattern, pragmaName, errors) {
-  if (!patterns[pattern]) throw ReferenceError(`Invalid validation pattern specified: ${pattern}`)
-  if (!patterns[pattern].test(value)) errors.push(`Invalid ${pragmaName} item: '${value}' must match ${patterns[pattern]}`)
-}
+const calledFunctions = new WeakMap();
 
-function size (value, min, max, pragmaName, errors) {
-  if (typeof value !== 'string') {
-    errors.push(`Invalid ${pragmaName} item: '${value}' must be a string`)
-  }
-  if (typeof min !== 'number' || typeof max !== 'number') {
-    throw ReferenceError('Invalid size specified')
-  }
-  if (value.length < min) {
-    errors.push(`Invalid ${pragmaName} item: '${value}' must be greater than ${min} characters`)
-  }
-  if (value.length > max) {
-    errors.push(`Invalid ${pragmaName} item: '${value}' must be less than ${max} characters`)
-  }
-}
+const onetime = (function_, options = {}) => {
+	if (typeof function_ !== 'function') {
+		throw new TypeError('Expected a function');
+	}
 
-function unique (lambdas, pragmaName, errors) {
-  if (!is.array(lambdas)) throw ReferenceError(`Invalid Lambda array: ${lambdas}`)
-  let names = []
-  if (lambdas.length) lambdas.forEach(({ name }) => {
-    let err = `Duplicate ${pragmaName} item: ${name}`
-    if (names.includes(name) && !errors.includes(err)) errors.push(err)
-    names.push(name)
-  })
-}
+	let returnValue;
+	let callCount = 0;
+	const functionName = function_.displayName || function_.name || '<anonymous>';
 
-module.exports = {
-  regex,
-  size,
-  unique,
+	const onetime = function (...arguments_) {
+		calledFunctions.set(onetime, ++callCount);
+
+		if (callCount === 1) {
+			returnValue = function_.apply(this, arguments_);
+			function_ = null;
+		} else if (options.throw === true) {
+			throw new Error(`Function \`${functionName}\` can only be called once`);
+		}
+
+		return returnValue;
+	};
+
+	mimicFn(onetime, function_);
+	calledFunctions.set(onetime, callCount);
+
+	return onetime;
+};
+
+module.exports = onetime;
+// TODO: Remove this for the next major release
+module.exports.default = onetime;
+
+module.exports.callCount = function_ => {
+	if (!calledFunctions.has(function_)) {
+		throw new Error(`The given function \`${function_.name}\` is not wrapped by the \`onetime\` package`);
+	}
+
+	return calledFunctions.get(function_);
+};
+
+
+/***/ }),
+
+/***/ 729:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let upsert = __webpack_require__(305)
+let validate = __webpack_require__(689)
+
+module.exports = function configureAWS ({ arc, inventory }) {
+  if (!arc.aws) return inventory.aws
+
+  let aws = upsert(inventory.aws, arc.aws)
+
+  validate.aws(aws)
+
+  return aws
 }
 
 
@@ -6645,20 +13599,14 @@ module.exports = {
 /***/ 745:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
+
 /**
  * Read env vars out of SSM
  */
 module.exports = function env (params, inventory, callback) {
   if (params.env) {
-    /* istanbul ignore next */
-    try {
-      // eslint-disable-next-line
-      var aws = __webpack_require__(71)
-    }
-    catch (err) {
-      let msg = `'aws-sdk' not found, please install locally or globally (see also readme#aws-sdk-caveat)`
-      return callback(Error(msg))
-    }
+    // eslint-disable-next-line
+    let aws = __webpack_require__(71)
     let name = inventory.app
     let { region } = inventory.aws
     let ssm = new aws.SSM({ region })
@@ -6674,7 +13622,6 @@ module.exports = function env (params, inventory, callback) {
       }
 
       // Check if we're paginating
-      /* istanbul ignore if */
       if (NextToken) query.NextToken = NextToken
 
       // Perform the query
@@ -6692,7 +13639,6 @@ module.exports = function env (params, inventory, callback) {
             }
           }))
           // Check for more data and, if so, recurse
-          /* istanbul ignore if */ // Sadly no way to easily mock this for testing
           if (data.NextToken) {
             getSomeEnvVars(name, data.NextToken, callback)
           }
@@ -6704,6 +13650,7 @@ module.exports = function env (params, inventory, callback) {
     getSomeEnvVars(name, false, function done (err, result) {
       if (err) callback(err)
       else {
+        let env = null
         if (result.length) {
           let testing = null
           let staging = null
@@ -6713,9 +13660,9 @@ module.exports = function env (params, inventory, callback) {
             if (r.env === 'staging') staging = Object.assign({}, staging, { [r.name]: r.value })
             if (r.env === 'production') production = Object.assign({}, production, { [r.name]: r.value })
           })
-          inventory._project.env = { testing, staging, production }
+          env = { testing, staging, production }
         }
-        callback()
+        callback(null, env)
       }
     })
   }
@@ -6729,6 +13676,27 @@ module.exports = function env (params, inventory, callback) {
 /***/ (function(module) {
 
 module.exports = require("fs");
+
+/***/ }),
+
+/***/ 750:
+/***/ (function(module) {
+
+"use strict";
+
+
+const mimicFn = (to, from) => {
+	for (const prop of Reflect.ownKeys(from)) {
+		Object.defineProperty(to, prop, Object.getOwnPropertyDescriptor(from, prop));
+	}
+
+	return to;
+};
+
+module.exports = mimicFn;
+// TODO: Remove this for the next major release
+module.exports.default = mimicFn;
+
 
 /***/ }),
 
@@ -6780,14 +13748,61 @@ let multipleResults = [
 
 /***/ }),
 
+/***/ 754:
+/***/ (function(module) {
+
+"use strict";
+
+
+const stringReplaceAll = (string, substring, replacer) => {
+	let index = string.indexOf(substring);
+	if (index === -1) {
+		return string;
+	}
+
+	const substringLength = substring.length;
+	let endIndex = 0;
+	let returnValue = '';
+	do {
+		returnValue += string.substr(endIndex, index - endIndex) + substring + replacer;
+		endIndex = index + substringLength;
+		index = string.indexOf(substring, endIndex);
+	} while (index !== -1);
+
+	returnValue += string.substr(endIndex);
+	return returnValue;
+};
+
+const stringEncaseCRLFWithFirstIndex = (string, prefix, postfix, index) => {
+	let endIndex = 0;
+	let returnValue = '';
+	do {
+		const gotCR = string[index - 1] === '\r';
+		returnValue += string.substr(endIndex, (gotCR ? index - 1 : index) - endIndex) + prefix + (gotCR ? '\r\n' : '\n') + postfix;
+		endIndex = index + 1;
+		index = string.indexOf('\n', endIndex);
+	} while (index !== -1);
+
+	returnValue += string.substr(endIndex);
+	return returnValue;
+};
+
+module.exports = {
+	stringReplaceAll,
+	stringEncaseCRLFWithFirstIndex
+};
+
+
+/***/ }),
+
 /***/ 799:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
-let { join } = __webpack_require__(622)
-let { existsSync } = __webpack_require__(747)
+const { join } = __webpack_require__(622)
+const { existsSync } = __webpack_require__(747)
 
-module.exports = function getPluginModules (project, errors) {
-  let arc = project.arc
+module.exports = function getPluginModules (project) {
+  const arc = project.arc
   if (!arc.plugins || !arc.plugins.length) return null
   let plugins = {}
   let cwd = project.src
@@ -6801,16 +13816,9 @@ module.exports = function getPluginModules (project, errors) {
     else if (existsSync(localPath1)) pluginPath = localPath1
     else if (existsSync(modulePath)) pluginPath = modulePath
     else if (existsSync(modulePath1)) pluginPath = modulePath1
-    if (pluginPath) {
-      try {
-        // eslint-disable-next-line
-        plugins[name] = __webpack_require__(590)(pluginPath)
-      }
-      catch (err) {
-        errors.push(`Unable to load plugin '${name}': ${err.message.split('\n')[0]}`)
-      }
-    }
-    else errors.push(`Cannot find plugin '${name}'! Are you sure you have installed or created it correctly?`)
+    // eslint-disable-next-line
+    if (pluginPath) plugins[name] = __webpack_require__(590)(pluginPath)
+    else console.warn(`Cannot find plugin ${name}! Are you sure you have installed or created it correctly?`)
   }
   return plugins
 }
@@ -6941,7 +13949,7 @@ let read = p => readFileSync(p).toString()
  * @param {string} cwd - absolute path to current working directory
  * @returns {object} { arc, raw, filepath }
  */
-module.exports = function reader (reads, cwd, errors) {
+module.exports = function reader (reads, cwd) {
   let filepath = false
   let raw = null
   let arc = null
@@ -6964,12 +13972,12 @@ module.exports = function reader (reads, cwd, errors) {
           if (type !== 'manifest') {
             filepath = file
             raw = read(file)
-            if (raw.trim() === '') return errors.push(`Empty file: ${f}`)
+            if (raw.trim() === '') throw Error('empty file')
             arc = type === 'arc'
               ? parse(raw)
               : parse[type](raw) // Parser has convenient json, yaml, toml methods!
           }
-          else {
+          else if (f === 'package.json') {
             let pkg = JSON.parse(read(file))
             let foundArc = pkg.arc || pkg.architect
             if (foundArc) {
@@ -6980,7 +13988,7 @@ module.exports = function reader (reads, cwd, errors) {
           }
         }
         catch (err) {
-          errors.push(`Problem reading ${f}: ${err.message}`)
+          throw Error(`Problem reading ${f}: ${err.message}`)
         }
       })
     }
@@ -7005,11 +14013,8 @@ let { join } = __webpack_require__(622)
 let validate = __webpack_require__(689)
 let is = __webpack_require__(300)
 
-module.exports = function configureViews ({ arc, pragmas, inventory, errors }) {
-  if (arc.views && !arc.http) {
-    errors.push('@views requires @http')
-    return null
-  }
+module.exports = function configureViews ({ arc, pragmas, inventory }) {
+  if (arc.views && !arc.http) throw Error('@views requires @http')
   if (!arc.http) return null
 
   let cwd = inventory._project.src
@@ -7028,7 +14033,7 @@ module.exports = function configureViews ({ arc, pragmas, inventory, errors }) {
       if (key === 'src' && is.string(view[1])) {
         views.src = view[1]
         foundSrc = true
-        validate.shared(views.src, cwd, errors)
+        validate.shared(views.src, cwd)
       }
     }
 
@@ -7048,7 +14053,7 @@ module.exports = function configureViews ({ arc, pragmas, inventory, errors }) {
         let name = `${method} ${path}`
         let route = pragmas.http.find(n => n.name === name)
         if (!route) {
-          return errors.push(`@views ${name} not found in @http routes`)
+          throw Error(`@views ${name} not found in @http routes`)
         }
         // Ignore views into ASAP
         if (!route.arcStaticAssetProxy) route.config.views = true
@@ -7066,10 +14071,78 @@ module.exports = function configureViews ({ arc, pragmas, inventory, errors }) {
     }
   }
 
-  // De-dupe (in case multiple functions live at the same src path)
-  views.views = [ ...new Set(views.views) ]
-
   return views
+}
+
+
+/***/ }),
+
+/***/ 828:
+/***/ (function(module) {
+
+module.exports = function configureProxy ({ arc }) {
+  if (arc.proxy && !arc.http) throw Error('@proxy requires @http')
+  if (!arc.proxy || !arc.http) return null
+
+  let proxy = {}
+  let envs = [ 'testing', 'staging', 'production' ]
+  envs.forEach(env => {
+    let setting = arc.proxy.find(s => {
+      return (s[0] && s[0] === env) && s[1]
+    })
+    if (!setting) throw Error(`@proxy ${env} environment not found`)
+    proxy[env] = setting[1]
+  })
+  return proxy
+}
+
+
+/***/ }),
+
+/***/ 833:
+/***/ (function(module) {
+
+module.exports = function configureTables ({ arc }) {
+  if (!arc.tables || !arc.tables.length) return null
+
+  let tables = arc.tables.map(t => {
+    if (typeof t === 'object' && !Array.isArray(t)) {
+      let name = Object.keys(t)[0]
+      let table = {
+        name,
+        partitionKey: null,
+        partitionKeyType: null,
+        sortKey: null,
+        sortKeyType: null,
+        stream: null,
+        ttl: null,
+        encrypt: null,
+        PointInTimeRecovery: null,
+      }
+      Object.entries(t[name]).forEach(([ key, value ]) => {
+        let isStr = typeof value === 'string'
+        let pitr = 'PointInTimeRecovery' // It's just so long
+        if (isStr && value.startsWith('**')) {
+          table.sortKey = key
+          table.sortKeyType = value.replace('**', '')
+        }
+        else if (isStr && value.startsWith('*')) {
+          table.partitionKey = key
+          table.partitionKeyType = value.replace('*', '')
+        }
+        if (key === 'stream')   table.stream = value
+        if (value === 'TTL')    table.ttl = key
+        if (key === 'encrypt')  table.encrypt = value
+        if (key === pitr)       table[pitr] = value
+        if (key === 'legacy')   table.legacy = value // Arc v5 to v8+ compat
+      })
+
+      return table
+    }
+    throw Error(`Invalid @tables item: ${t}`)
+  })
+
+  return tables
 }
 
 
@@ -7143,20 +14216,539 @@ module.exports = function parse (raw, sourcemap = false) {
 
 /***/ }),
 
-/***/ 850:
+/***/ 840:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
-let is = __webpack_require__(300)
+let populate = __webpack_require__(631)
 
-module.exports = function validatePreferences (preferences, errors) {
+module.exports = function configurePlugins ({ arc, inventory }) {
+  if (!arc.plugins || !arc.plugins.length) return null
+
+  let plugins = populate.plugins(arc.plugins, inventory)
+
+  return plugins
+}
+
+
+/***/ }),
+
+/***/ 843:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+const ansiStyles = __webpack_require__(663);
+const {stdout: stdoutColor, stderr: stderrColor} = __webpack_require__(247);
+const {
+	stringReplaceAll,
+	stringEncaseCRLFWithFirstIndex
+} = __webpack_require__(754);
+
+const {isArray} = Array;
+
+// `supportsColor.level` → `ansiStyles.color[name]` mapping
+const levelMapping = [
+	'ansi',
+	'ansi',
+	'ansi256',
+	'ansi16m'
+];
+
+const styles = Object.create(null);
+
+const applyOptions = (object, options = {}) => {
+	if (options.level && !(Number.isInteger(options.level) && options.level >= 0 && options.level <= 3)) {
+		throw new Error('The `level` option should be an integer from 0 to 3');
+	}
+
+	// Detect level if not set manually
+	const colorLevel = stdoutColor ? stdoutColor.level : 0;
+	object.level = options.level === undefined ? colorLevel : options.level;
+};
+
+class ChalkClass {
+	constructor(options) {
+		// eslint-disable-next-line no-constructor-return
+		return chalkFactory(options);
+	}
+}
+
+const chalkFactory = options => {
+	const chalk = {};
+	applyOptions(chalk, options);
+
+	chalk.template = (...arguments_) => chalkTag(chalk.template, ...arguments_);
+
+	Object.setPrototypeOf(chalk, Chalk.prototype);
+	Object.setPrototypeOf(chalk.template, chalk);
+
+	chalk.template.constructor = () => {
+		throw new Error('`chalk.constructor()` is deprecated. Use `new chalk.Instance()` instead.');
+	};
+
+	chalk.template.Instance = ChalkClass;
+
+	return chalk.template;
+};
+
+function Chalk(options) {
+	return chalkFactory(options);
+}
+
+for (const [styleName, style] of Object.entries(ansiStyles)) {
+	styles[styleName] = {
+		get() {
+			const builder = createBuilder(this, createStyler(style.open, style.close, this._styler), this._isEmpty);
+			Object.defineProperty(this, styleName, {value: builder});
+			return builder;
+		}
+	};
+}
+
+styles.visible = {
+	get() {
+		const builder = createBuilder(this, this._styler, true);
+		Object.defineProperty(this, 'visible', {value: builder});
+		return builder;
+	}
+};
+
+const usedModels = ['rgb', 'hex', 'keyword', 'hsl', 'hsv', 'hwb', 'ansi', 'ansi256'];
+
+for (const model of usedModels) {
+	styles[model] = {
+		get() {
+			const {level} = this;
+			return function (...arguments_) {
+				const styler = createStyler(ansiStyles.color[levelMapping[level]][model](...arguments_), ansiStyles.color.close, this._styler);
+				return createBuilder(this, styler, this._isEmpty);
+			};
+		}
+	};
+}
+
+for (const model of usedModels) {
+	const bgModel = 'bg' + model[0].toUpperCase() + model.slice(1);
+	styles[bgModel] = {
+		get() {
+			const {level} = this;
+			return function (...arguments_) {
+				const styler = createStyler(ansiStyles.bgColor[levelMapping[level]][model](...arguments_), ansiStyles.bgColor.close, this._styler);
+				return createBuilder(this, styler, this._isEmpty);
+			};
+		}
+	};
+}
+
+const proto = Object.defineProperties(() => {}, {
+	...styles,
+	level: {
+		enumerable: true,
+		get() {
+			return this._generator.level;
+		},
+		set(level) {
+			this._generator.level = level;
+		}
+	}
+});
+
+const createStyler = (open, close, parent) => {
+	let openAll;
+	let closeAll;
+	if (parent === undefined) {
+		openAll = open;
+		closeAll = close;
+	} else {
+		openAll = parent.openAll + open;
+		closeAll = close + parent.closeAll;
+	}
+
+	return {
+		open,
+		close,
+		openAll,
+		closeAll,
+		parent
+	};
+};
+
+const createBuilder = (self, _styler, _isEmpty) => {
+	const builder = (...arguments_) => {
+		if (isArray(arguments_[0]) && isArray(arguments_[0].raw)) {
+			// Called as a template literal, for example: chalk.red`2 + 3 = {bold ${2+3}}`
+			return applyStyle(builder, chalkTag(builder, ...arguments_));
+		}
+
+		// Single argument is hot path, implicit coercion is faster than anything
+		// eslint-disable-next-line no-implicit-coercion
+		return applyStyle(builder, (arguments_.length === 1) ? ('' + arguments_[0]) : arguments_.join(' '));
+	};
+
+	// We alter the prototype because we must return a function, but there is
+	// no way to create a function with a different prototype
+	Object.setPrototypeOf(builder, proto);
+
+	builder._generator = self;
+	builder._styler = _styler;
+	builder._isEmpty = _isEmpty;
+
+	return builder;
+};
+
+const applyStyle = (self, string) => {
+	if (self.level <= 0 || !string) {
+		return self._isEmpty ? '' : string;
+	}
+
+	let styler = self._styler;
+
+	if (styler === undefined) {
+		return string;
+	}
+
+	const {openAll, closeAll} = styler;
+	if (string.indexOf('\u001B') !== -1) {
+		while (styler !== undefined) {
+			// Replace any instances already present with a re-opening code
+			// otherwise only the part of the string until said closing code
+			// will be colored, and the rest will simply be 'plain'.
+			string = stringReplaceAll(string, styler.close, styler.open);
+
+			styler = styler.parent;
+		}
+	}
+
+	// We can move both next actions out of loop, because remaining actions in loop won't have
+	// any/visible effect on parts we add here. Close the styling before a linebreak and reopen
+	// after next line to fix a bleed issue on macOS: https://github.com/chalk/chalk/pull/92
+	const lfIndex = string.indexOf('\n');
+	if (lfIndex !== -1) {
+		string = stringEncaseCRLFWithFirstIndex(string, closeAll, openAll, lfIndex);
+	}
+
+	return openAll + string + closeAll;
+};
+
+let template;
+const chalkTag = (chalk, ...strings) => {
+	const [firstString] = strings;
+
+	if (!isArray(firstString) || !isArray(firstString.raw)) {
+		// If chalk() was called by itself or with a string,
+		// return the string itself as a string.
+		return strings.join(' ');
+	}
+
+	const arguments_ = strings.slice(1);
+	const parts = [firstString.raw[0]];
+
+	for (let i = 1; i < firstString.length; i++) {
+		parts.push(
+			String(arguments_[i - 1]).replace(/[{}\\]/g, '\\$&'),
+			String(firstString.raw[i])
+		);
+	}
+
+	if (template === undefined) {
+		template = __webpack_require__(606);
+	}
+
+	return template(chalk, parts.join(''));
+};
+
+Object.defineProperties(Chalk.prototype, styles);
+
+const chalk = Chalk(); // eslint-disable-line new-cap
+chalk.supportsColor = stdoutColor;
+chalk.stderr = Chalk({level: stderrColor ? stderrColor.level : 0}); // eslint-disable-line new-cap
+chalk.stderr.supportsColor = stderrColor;
+
+module.exports = chalk;
+
+
+/***/ }),
+
+/***/ 846:
+/***/ (function(module) {
+
+module.exports = function configureCDN ({ arc }) {
+  if (arc.cdn && !arc.http) throw Error('@cdn requires @http')
+  if (!arc.cdn || !arc.http) return null
+
+  let cdn
+  if (arc.cdn === true) cdn = true
+  else if (Array.isArray(arc.cdn)) {
+    let disabled = [ false, 'disable', 'disabled' ]
+    let isDisabled = disabled.some(s => s === arc.cdn[0])
+    if (isDisabled) cdn = false
+    else cdn = true
+  }
+
+  return cdn
+}
+
+
+/***/ }),
+
+/***/ 850:
+/***/ (function(module) {
+
+module.exports = function validatePreferences (preferences) {
   // Env checks
   let { env } = preferences
   if (!env) return
-  if (env && !is.object(env)) errors.push(`Invalid preferences setting: @env ${env}`)
+  if (env && typeof env !== 'object') envErr(env)
 
   let envs = [ 'testing', 'staging', 'production' ]
   envs.forEach(e => {
-    if (env[e] && !is.object(env[e])) errors.push(`Invalid preferences setting: @env ${e}`)
+    if (env[e] && typeof env[e] !== 'object') envErr(e)
+    if (env[e] && Array.isArray(env[e])) envErr(e)
+  })
+}
+
+function envErr (e) {
+  throw ReferenceError(`Invalid preferences setting: @env ${e}`)
+}
+
+
+/***/ }),
+
+/***/ 856:
+/***/ (function(__unusedmodule, exports, __webpack_require__) {
+
+exports.setopts = setopts
+exports.ownProp = ownProp
+exports.makeAbs = makeAbs
+exports.finish = finish
+exports.mark = mark
+exports.isIgnored = isIgnored
+exports.childrenIgnored = childrenIgnored
+
+function ownProp (obj, field) {
+  return Object.prototype.hasOwnProperty.call(obj, field)
+}
+
+var path = __webpack_require__(622)
+var minimatch = __webpack_require__(93)
+var isAbsolute = __webpack_require__(681)
+var Minimatch = minimatch.Minimatch
+
+function alphasort (a, b) {
+  return a.localeCompare(b, 'en')
+}
+
+function setupIgnores (self, options) {
+  self.ignore = options.ignore || []
+
+  if (!Array.isArray(self.ignore))
+    self.ignore = [self.ignore]
+
+  if (self.ignore.length) {
+    self.ignore = self.ignore.map(ignoreMap)
+  }
+}
+
+// ignore patterns are always in dot:true mode.
+function ignoreMap (pattern) {
+  var gmatcher = null
+  if (pattern.slice(-3) === '/**') {
+    var gpattern = pattern.replace(/(\/\*\*)+$/, '')
+    gmatcher = new Minimatch(gpattern, { dot: true })
+  }
+
+  return {
+    matcher: new Minimatch(pattern, { dot: true }),
+    gmatcher: gmatcher
+  }
+}
+
+function setopts (self, pattern, options) {
+  if (!options)
+    options = {}
+
+  // base-matching: just use globstar for that.
+  if (options.matchBase && -1 === pattern.indexOf("/")) {
+    if (options.noglobstar) {
+      throw new Error("base matching requires globstar")
+    }
+    pattern = "**/" + pattern
+  }
+
+  self.silent = !!options.silent
+  self.pattern = pattern
+  self.strict = options.strict !== false
+  self.realpath = !!options.realpath
+  self.realpathCache = options.realpathCache || Object.create(null)
+  self.follow = !!options.follow
+  self.dot = !!options.dot
+  self.mark = !!options.mark
+  self.nodir = !!options.nodir
+  if (self.nodir)
+    self.mark = true
+  self.sync = !!options.sync
+  self.nounique = !!options.nounique
+  self.nonull = !!options.nonull
+  self.nosort = !!options.nosort
+  self.nocase = !!options.nocase
+  self.stat = !!options.stat
+  self.noprocess = !!options.noprocess
+  self.absolute = !!options.absolute
+
+  self.maxLength = options.maxLength || Infinity
+  self.cache = options.cache || Object.create(null)
+  self.statCache = options.statCache || Object.create(null)
+  self.symlinks = options.symlinks || Object.create(null)
+
+  setupIgnores(self, options)
+
+  self.changedCwd = false
+  var cwd = process.cwd()
+  if (!ownProp(options, "cwd"))
+    self.cwd = cwd
+  else {
+    self.cwd = path.resolve(options.cwd)
+    self.changedCwd = self.cwd !== cwd
+  }
+
+  self.root = options.root || path.resolve(self.cwd, "/")
+  self.root = path.resolve(self.root)
+  if (process.platform === "win32")
+    self.root = self.root.replace(/\\/g, "/")
+
+  // TODO: is an absolute `cwd` supposed to be resolved against `root`?
+  // e.g. { cwd: '/test', root: __dirname } === path.join(__dirname, '/test')
+  self.cwdAbs = isAbsolute(self.cwd) ? self.cwd : makeAbs(self, self.cwd)
+  if (process.platform === "win32")
+    self.cwdAbs = self.cwdAbs.replace(/\\/g, "/")
+  self.nomount = !!options.nomount
+
+  // disable comments and negation in Minimatch.
+  // Note that they are not supported in Glob itself anyway.
+  options.nonegate = true
+  options.nocomment = true
+
+  self.minimatch = new Minimatch(pattern, options)
+  self.options = self.minimatch.options
+}
+
+function finish (self) {
+  var nou = self.nounique
+  var all = nou ? [] : Object.create(null)
+
+  for (var i = 0, l = self.matches.length; i < l; i ++) {
+    var matches = self.matches[i]
+    if (!matches || Object.keys(matches).length === 0) {
+      if (self.nonull) {
+        // do like the shell, and spit out the literal glob
+        var literal = self.minimatch.globSet[i]
+        if (nou)
+          all.push(literal)
+        else
+          all[literal] = true
+      }
+    } else {
+      // had matches
+      var m = Object.keys(matches)
+      if (nou)
+        all.push.apply(all, m)
+      else
+        m.forEach(function (m) {
+          all[m] = true
+        })
+    }
+  }
+
+  if (!nou)
+    all = Object.keys(all)
+
+  if (!self.nosort)
+    all = all.sort(alphasort)
+
+  // at *some* point we statted all of these
+  if (self.mark) {
+    for (var i = 0; i < all.length; i++) {
+      all[i] = self._mark(all[i])
+    }
+    if (self.nodir) {
+      all = all.filter(function (e) {
+        var notDir = !(/\/$/.test(e))
+        var c = self.cache[e] || self.cache[makeAbs(self, e)]
+        if (notDir && c)
+          notDir = c !== 'DIR' && !Array.isArray(c)
+        return notDir
+      })
+    }
+  }
+
+  if (self.ignore.length)
+    all = all.filter(function(m) {
+      return !isIgnored(self, m)
+    })
+
+  self.found = all
+}
+
+function mark (self, p) {
+  var abs = makeAbs(self, p)
+  var c = self.cache[abs]
+  var m = p
+  if (c) {
+    var isDir = c === 'DIR' || Array.isArray(c)
+    var slash = p.slice(-1) === '/'
+
+    if (isDir && !slash)
+      m += '/'
+    else if (!isDir && slash)
+      m = m.slice(0, -1)
+
+    if (m !== p) {
+      var mabs = makeAbs(self, m)
+      self.statCache[mabs] = self.statCache[abs]
+      self.cache[mabs] = self.cache[abs]
+    }
+  }
+
+  return m
+}
+
+// lotta situps...
+function makeAbs (self, f) {
+  var abs = f
+  if (f.charAt(0) === '/') {
+    abs = path.join(self.root, f)
+  } else if (isAbsolute(f) || f === '') {
+    abs = f
+  } else if (self.changedCwd) {
+    abs = path.resolve(self.cwd, f)
+  } else {
+    abs = path.resolve(f)
+  }
+
+  if (process.platform === 'win32')
+    abs = abs.replace(/\\/g, '/')
+
+  return abs
+}
+
+
+// Return true, if pattern ends with globstar '**', for the accompanying parent directory.
+// Ex:- If node_modules/** is the pattern, add 'node_modules' to ignore list along with it's contents
+function isIgnored (self, path) {
+  if (!self.ignore.length)
+    return false
+
+  return self.ignore.some(function(item) {
+    return item.matcher.match(path) || !!(item.gmatcher && item.gmatcher.match(path))
+  })
+}
+
+function childrenIgnored (self, path) {
+  if (!self.ignore.length)
+    return false
+
+  return self.ignore.some(function(item) {
+    return !!(item.gmatcher && item.gmatcher.match(path))
   })
 }
 
@@ -7191,42 +14783,10 @@ module.exports = function array (lines) {
 
 /***/ }),
 
-/***/ 876:
+/***/ 867:
 /***/ (function(module) {
 
-module.exports = {
-  // Register of all official, blessed Architect pragmas
-  all: [
-    'app',
-    'aws',
-    'cdn',
-    'events',
-    'http',
-    'indexes',
-    'macros',
-    'plugins',
-    'proxy',
-    'queues',
-    'scheduled',
-    'shared',
-    'static',
-    'streams',
-    'tables',
-    'views',
-    'ws',
-  ],
-  // Pragmas that (if present) are expected to contain Lambdae
-  lambdas: [
-    'events',
-    'http',
-    'plugins',
-    'queues',
-    'scheduled',
-    'streams',
-    'ws',
-  ],
-}
-
+module.exports = require("tty");
 
 /***/ }),
 
@@ -7241,6 +14801,186 @@ module.exports = class VectorNameNotStrng extends SyntaxError {
     this.name = this.constructor.name
   }
 }
+
+
+/***/ }),
+
+/***/ 885:
+/***/ (function(module) {
+
+"use strict";
+
+
+module.exports = {
+	"aliceblue": [240, 248, 255],
+	"antiquewhite": [250, 235, 215],
+	"aqua": [0, 255, 255],
+	"aquamarine": [127, 255, 212],
+	"azure": [240, 255, 255],
+	"beige": [245, 245, 220],
+	"bisque": [255, 228, 196],
+	"black": [0, 0, 0],
+	"blanchedalmond": [255, 235, 205],
+	"blue": [0, 0, 255],
+	"blueviolet": [138, 43, 226],
+	"brown": [165, 42, 42],
+	"burlywood": [222, 184, 135],
+	"cadetblue": [95, 158, 160],
+	"chartreuse": [127, 255, 0],
+	"chocolate": [210, 105, 30],
+	"coral": [255, 127, 80],
+	"cornflowerblue": [100, 149, 237],
+	"cornsilk": [255, 248, 220],
+	"crimson": [220, 20, 60],
+	"cyan": [0, 255, 255],
+	"darkblue": [0, 0, 139],
+	"darkcyan": [0, 139, 139],
+	"darkgoldenrod": [184, 134, 11],
+	"darkgray": [169, 169, 169],
+	"darkgreen": [0, 100, 0],
+	"darkgrey": [169, 169, 169],
+	"darkkhaki": [189, 183, 107],
+	"darkmagenta": [139, 0, 139],
+	"darkolivegreen": [85, 107, 47],
+	"darkorange": [255, 140, 0],
+	"darkorchid": [153, 50, 204],
+	"darkred": [139, 0, 0],
+	"darksalmon": [233, 150, 122],
+	"darkseagreen": [143, 188, 143],
+	"darkslateblue": [72, 61, 139],
+	"darkslategray": [47, 79, 79],
+	"darkslategrey": [47, 79, 79],
+	"darkturquoise": [0, 206, 209],
+	"darkviolet": [148, 0, 211],
+	"deeppink": [255, 20, 147],
+	"deepskyblue": [0, 191, 255],
+	"dimgray": [105, 105, 105],
+	"dimgrey": [105, 105, 105],
+	"dodgerblue": [30, 144, 255],
+	"firebrick": [178, 34, 34],
+	"floralwhite": [255, 250, 240],
+	"forestgreen": [34, 139, 34],
+	"fuchsia": [255, 0, 255],
+	"gainsboro": [220, 220, 220],
+	"ghostwhite": [248, 248, 255],
+	"gold": [255, 215, 0],
+	"goldenrod": [218, 165, 32],
+	"gray": [128, 128, 128],
+	"green": [0, 128, 0],
+	"greenyellow": [173, 255, 47],
+	"grey": [128, 128, 128],
+	"honeydew": [240, 255, 240],
+	"hotpink": [255, 105, 180],
+	"indianred": [205, 92, 92],
+	"indigo": [75, 0, 130],
+	"ivory": [255, 255, 240],
+	"khaki": [240, 230, 140],
+	"lavender": [230, 230, 250],
+	"lavenderblush": [255, 240, 245],
+	"lawngreen": [124, 252, 0],
+	"lemonchiffon": [255, 250, 205],
+	"lightblue": [173, 216, 230],
+	"lightcoral": [240, 128, 128],
+	"lightcyan": [224, 255, 255],
+	"lightgoldenrodyellow": [250, 250, 210],
+	"lightgray": [211, 211, 211],
+	"lightgreen": [144, 238, 144],
+	"lightgrey": [211, 211, 211],
+	"lightpink": [255, 182, 193],
+	"lightsalmon": [255, 160, 122],
+	"lightseagreen": [32, 178, 170],
+	"lightskyblue": [135, 206, 250],
+	"lightslategray": [119, 136, 153],
+	"lightslategrey": [119, 136, 153],
+	"lightsteelblue": [176, 196, 222],
+	"lightyellow": [255, 255, 224],
+	"lime": [0, 255, 0],
+	"limegreen": [50, 205, 50],
+	"linen": [250, 240, 230],
+	"magenta": [255, 0, 255],
+	"maroon": [128, 0, 0],
+	"mediumaquamarine": [102, 205, 170],
+	"mediumblue": [0, 0, 205],
+	"mediumorchid": [186, 85, 211],
+	"mediumpurple": [147, 112, 219],
+	"mediumseagreen": [60, 179, 113],
+	"mediumslateblue": [123, 104, 238],
+	"mediumspringgreen": [0, 250, 154],
+	"mediumturquoise": [72, 209, 204],
+	"mediumvioletred": [199, 21, 133],
+	"midnightblue": [25, 25, 112],
+	"mintcream": [245, 255, 250],
+	"mistyrose": [255, 228, 225],
+	"moccasin": [255, 228, 181],
+	"navajowhite": [255, 222, 173],
+	"navy": [0, 0, 128],
+	"oldlace": [253, 245, 230],
+	"olive": [128, 128, 0],
+	"olivedrab": [107, 142, 35],
+	"orange": [255, 165, 0],
+	"orangered": [255, 69, 0],
+	"orchid": [218, 112, 214],
+	"palegoldenrod": [238, 232, 170],
+	"palegreen": [152, 251, 152],
+	"paleturquoise": [175, 238, 238],
+	"palevioletred": [219, 112, 147],
+	"papayawhip": [255, 239, 213],
+	"peachpuff": [255, 218, 185],
+	"peru": [205, 133, 63],
+	"pink": [255, 192, 203],
+	"plum": [221, 160, 221],
+	"powderblue": [176, 224, 230],
+	"purple": [128, 0, 128],
+	"rebeccapurple": [102, 51, 153],
+	"red": [255, 0, 0],
+	"rosybrown": [188, 143, 143],
+	"royalblue": [65, 105, 225],
+	"saddlebrown": [139, 69, 19],
+	"salmon": [250, 128, 114],
+	"sandybrown": [244, 164, 96],
+	"seagreen": [46, 139, 87],
+	"seashell": [255, 245, 238],
+	"sienna": [160, 82, 45],
+	"silver": [192, 192, 192],
+	"skyblue": [135, 206, 235],
+	"slateblue": [106, 90, 205],
+	"slategray": [112, 128, 144],
+	"slategrey": [112, 128, 144],
+	"snow": [255, 250, 250],
+	"springgreen": [0, 255, 127],
+	"steelblue": [70, 130, 180],
+	"tan": [210, 180, 140],
+	"teal": [0, 128, 128],
+	"thistle": [216, 191, 216],
+	"tomato": [255, 99, 71],
+	"turquoise": [64, 224, 208],
+	"violet": [238, 130, 238],
+	"wheat": [245, 222, 179],
+	"white": [255, 255, 255],
+	"whitesmoke": [245, 245, 245],
+	"yellow": [255, 255, 0],
+	"yellowgreen": [154, 205, 50]
+};
+
+
+/***/ }),
+
+/***/ 896:
+/***/ (function(module) {
+
+module.exports = function (xs, fn) {
+    var res = [];
+    for (var i = 0; i < xs.length; i++) {
+        var x = fn(xs[i], i);
+        if (isArray(x)) res.push.apply(res, x);
+        else res.push(x);
+    }
+    return res;
+};
+
+var isArray = Array.isArray || function (xs) {
+    return Object.prototype.toString.call(xs) === '[object Array]';
+};
 
 
 /***/ }),
@@ -7417,36 +15157,58 @@ module.exports = function lex (code) {
 let { join, resolve, sep } = __webpack_require__(622)
 let is = __webpack_require__(300)
 
-module.exports = function validateShared (src, cwd, errors) {
+module.exports = function validateShared (src, cwd) {
   let path = src && resolve(join(cwd, src))
 
-  if (!is.exists(path)) errors.push(`Directory not found: ${src}`)
-  else if (!is.folder(path)) errors.push(`Must be a directory: ${src}`)
-
+  if (!is.exists(path)) {
+    throw Error(`Directory not found: ${src}`)
+  }
+  if (!is.folder(path)) {
+    throw Error(`Must be a directory: ${src}`)
+  }
   let valid = path && path.startsWith(cwd) &&
               (cwd.split(sep) < path.split(sep))
-  if (!valid) errors.push(`Directory must be a subfolder of this project: ${src}`)
+  if (!valid) throw Error(`Directory must be a subfolder of this project: ${src}`)
 }
 
 
 /***/ }),
 
-/***/ 944:
+/***/ 946:
 /***/ (function(module) {
 
-module.exports = function validateProxy (proxy, errors) {
-  Object.values(proxy).forEach(url => {
-    try {
-      let isHttp = /^https?:$/
-      let { protocol } = new URL(url)
-      if (!isHttp.test(protocol)) {
-        errors.push(`Invalid @proxy protocol: ${url}`)
-      }
+/*! run-waterfall. MIT License. Feross Aboukhadijeh <https://feross.org/opensource> */
+module.exports = runWaterfall
+
+function runWaterfall (tasks, cb) {
+  var current = 0
+  var isSync = true
+
+  function done (err, args) {
+    function end () {
+      args = args ? [].concat(err, args) : [err]
+      if (cb) cb.apply(undefined, args)
     }
-    catch (e) {
-      errors.push(`Invalid @proxy URL: ${url}`)
+    if (isSync) process.nextTick(end)
+    else end()
+  }
+
+  function each (err) {
+    var args = Array.prototype.slice.call(arguments, 1)
+    if (++current >= tasks.length || err) {
+      done(err, args)
+    } else {
+      tasks[current].apply(undefined, [].concat(args, each))
     }
-  })
+  }
+
+  if (tasks.length) {
+    tasks[0](each)
+  } else {
+    done(null)
+  }
+
+  isSync = false
 }
 
 
@@ -7484,61 +15246,125 @@ let preferences = {
 let reads = { projectManifest, functionConfig, preferences }
 
 // Heads up: always put _default last!
-module.exports = function read ({ type, cwd, errors }) {
-  if (reads[type]) return reader(reads[type], cwd, errors)
+module.exports = function read ({ type, cwd }) {
+  if (reads[type]) return reader(reads[type], cwd)
   else throw Error('Unknown format read')
 }
 
 
 /***/ }),
 
-/***/ 957:
-/***/ (function(module, __unusedexports, __webpack_require__) {
+/***/ 959:
+/***/ (function(__unusedmodule, exports, __webpack_require__) {
 
-let { regex, size, unique } = __webpack_require__(739)
+"use strict";
 
-/**
- * Validate @events + @queues
- *
- * Where possible, attempts to follow SNS + SQS validation:
- * See: https://docs.aws.amazon.com/sns/latest/dg/sns-message-attributes.html
- * See: https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-message-metadata.html
- */
-module.exports = function validateEventsAndQueues (pragma, pragmaName, errors) {
-  if (pragma.length) {
-    unique(pragma, pragmaName, errors)
 
-    pragma.forEach(event => {
-      let { name } = event
-      regex(name, 'veryLooseName', pragmaName, errors)
+var Transform = __webpack_require__(413).Transform
+var crypto = __webpack_require__(417)
+var fs = __webpack_require__(598)
 
-      // Assume 10 chars are taken up by resource naming in arc/package
-      size(name, 1, 246, pragmaName, errors)
+exports.check = check
+exports.checkSync = checkSync
+exports.get = get
+exports.getSync = getSync
+exports.stream = stream
 
-      // Starts with a period
-      if (name.match(/^\./g)) {
-        errors.push(`Invalid ${pragmaName} item (cannot start with a period): ${name}`)
-      }
-
-      // Ends with a period
-      if (name.match(/\.$/g)) {
-        errors.push(`Invalid ${pragmaName} item (cannot end with a period): ${name}`)
-      }
-
-      // Contains successive periods, i.e. ..
-      if (name.match(/\.\./g)) {
-        errors.push(`Invalid ${pragmaName} item (cannot have successive periods): ${name}`)
-      }
-
-      // Cannot start with 'AWS' or 'Amazon'
-      let n = name.toLowerCase()
-      if (n.startsWith('aws') || n.startsWith('amazon')) {
-        errors.push(`Invalid ${pragmaName} item (cannot start with 'AWS' or 'Amazon'): ${name}`)
-      }
-    })
+function check(file, expected, options, cb) {
+  if (typeof options === 'function') {
+    cb = options
+    options = undefined
+  }
+  expected = expected.toLowerCase().trim()
+  get(file, options, function (er, actual) {
+    if (er) {
+      if (er.message) er.message += ' while getting shasum for ' + file
+      return cb(er)
+    }
+    if (actual === expected) return cb(null)
+    cb(new Error(
+        'shasum check failed for ' + file + '\n'
+      + 'Expected: ' + expected + '\n'
+      + 'Actual:   ' + actual))
+  })
+}
+function checkSync(file, expected, options) {
+  expected = expected.toLowerCase().trim()
+  var actual
+  try {
+    actual = getSync(file, options)
+  } catch (er) {
+    if (er.message) er.message += ' while getting shasum for ' + file
+    throw er
+  }
+  if (actual !== expected) {
+    var ex = new Error(
+        'shasum check failed for ' + file + '\n'
+      + 'Expected: ' + expected + '\n'
+      + 'Actual:   ' + actual)
+    throw ex
   }
 }
 
+
+function get(file, options, cb) {
+  if (typeof options === 'function') {
+    cb = options
+    options = undefined
+  }
+  options = options || {}
+  var algorithm = options.algorithm || 'sha1'
+  var hash = crypto.createHash(algorithm)
+  var source = fs.createReadStream(file)
+  var errState = null
+  source
+    .on('error', function (er) {
+      if (errState) return
+      return cb(errState = er)
+    })
+    .on('data', function (chunk) {
+      if (errState) return
+      hash.update(chunk)
+    })
+    .on('end', function () {
+      if (errState) return
+      var actual = hash.digest("hex").toLowerCase().trim()
+      cb(null, actual)
+    })
+}
+
+function getSync(file, options) {
+  options = options || {}
+  var algorithm = options.algorithm || 'sha1'
+  var hash = crypto.createHash(algorithm)
+  var source = fs.readFileSync(file)
+  hash.update(source)
+  return hash.digest("hex").toLowerCase().trim()
+}
+
+function stream(expected, options) {
+  expected = expected.toLowerCase().trim()
+  options = options || {}
+  var algorithm = options.algorithm || 'sha1'
+  var hash = crypto.createHash(algorithm)
+
+  var stream = new Transform()
+  stream._transform = function (chunk, encoding, callback) {
+    hash.update(chunk)
+    stream.push(chunk)
+    callback()
+  }
+  stream._flush = function (cb) {
+    var actual = hash.digest("hex").toLowerCase().trim()
+    if (actual === expected) return cb(null)
+    cb(new Error(
+        'shasum check failed for:\n'
+      + '  Expected: ' + expected + '\n'
+      + '  Actual:   ' + actual))
+    this.push(null)
+  }
+  return stream
+}
 
 /***/ }),
 
@@ -7636,6 +15462,73 @@ module.exports = function type ({ tokens, index }) {
 
 /***/ }),
 
+/***/ 986:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+let { join } = __webpack_require__(622)
+
+let coerceNumbers = str => !isNaN(Number(str)) ? Number(str) : str
+
+function getRate (expression) {
+  // TODO validation
+  let bits = expression.split(' ')
+  bits = bits.map(coerceNumbers)
+  return {
+    expression,
+    value: bits[0],
+    interval: bits[1]
+  }
+}
+
+function getCron (expression) {
+  // TODO validation
+  let bits = expression.split(' ')
+  bits = bits.map(coerceNumbers)
+  return {
+    expression,
+    minutes: bits[0],
+    hours: bits[1],
+    dayOfMonth: bits[2],
+    month: bits[3],
+    dayOfWeek: bits[4],
+    year: bits[5],
+  }
+}
+
+module.exports = function populateScheduled ({ item, dir, cwd }) {
+  let rate = null
+  let cron = null
+  if (Array.isArray(item) && item.length >= 3) {
+    let name = item[0]
+
+    // Handle rate + cron
+    let sched = item.slice(1).join(' ').split('(')
+    let schedType = sched[0]
+    let schedValue = sched[1].replace(')', '')
+    if (schedType === 'rate') rate = getRate(schedValue)
+    if (schedType === 'cron') cron = getCron(schedValue)
+
+    let src = join(cwd, dir, name)
+    return { name, src, rate, cron }
+  }
+  else if (typeof item === 'object' && !Array.isArray(item)) {
+    let name = Object.keys(item)[0]
+
+    // Handle rate + cron
+    if (item[name].rate) rate = getRate(item[name].rate.join(' '))
+    if (item[name].cron) cron = getCron(item[name].cron.join(' '))
+
+    let src = item[name].src
+      ? join(cwd, item[name].src)
+      : join(cwd, dir, name)
+    return { name, src, rate, cron }
+  }
+  throw Error(`Invalid @scheduled item: ${item}`)
+}
+
+
+/***/ }),
+
 /***/ 989:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
@@ -7680,4 +15573,26 @@ module.exports = function parseYAML (text) {
 
 /***/ })
 
-/******/ });
+/******/ },
+/******/ function(__webpack_require__) { // webpackRuntimeModules
+/******/ 	"use strict";
+/******/ 
+/******/ 	/* webpack/runtime/node module decorator */
+/******/ 	!function() {
+/******/ 		__webpack_require__.nmd = function(module) {
+/******/ 			module.paths = [];
+/******/ 			if (!module.children) module.children = [];
+/******/ 			Object.defineProperty(module, 'loaded', {
+/******/ 				enumerable: true,
+/******/ 				get: function() { return module.l; }
+/******/ 			});
+/******/ 			Object.defineProperty(module, 'id', {
+/******/ 				enumerable: true,
+/******/ 				get: function() { return module.i; }
+/******/ 			});
+/******/ 			return module;
+/******/ 		};
+/******/ 	}();
+/******/ 	
+/******/ }
+);
